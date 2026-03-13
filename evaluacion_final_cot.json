@@ -1,0 +1,262 @@
+[
+    {
+        "id": 0,
+        "escenario": "Estrés hídrico severo",
+        "input": "NDVI: 0.2, ET0: 7.5, Lluvia: 0.0",
+        "respuesta_base": "Para calcular la prescripción de riego, necesitamos considerar varios factores, incluyendo el Índice de Vegetación por Diferencia Normalizada (NDVI), la evapotranspiración potencial (ET0) y la precipitación (lluvia) registrada. \n\nLa fórmula general para la prescripción de riego es:\n\nPrescripción de riego = ET0 - (precipitación + precipitación acumulada)\n\nSin embargo, para calcular la precipitación acumulada, necesitamos saber el período de tiempo considerado para la acumulación. Suponiendo que no se proporciona este dato, asumiremos que la precipitación acumulada es igual a la precipitación registrada en el último período de tiempo disponible.\n\nDado:\n- NDVI: 0.2 (no se utiliza directamente en la fórmula, pero puede ser útil para evaluar el estado de la vegetación)\n- ET0: 7.5 mm (evapotranspiración potencial)\n- Lluvia: 0.0 mm (precipitación registrada)\n\nPrescripción de riego =",
+        "respuesta_ft": "ANÁLISIS: Con un NDVI de 0.2, el coeficiente de cultivo (Kc) estimado es 0.55. La demanda hídrica calculada para 3 días (ET0 7.5mm * Kc * 3) es 12.4mm. Restando 0.0mm de lluvia acumulada, la PRESCRIPCIÓN FINAL es de 12mm.",
+        "evaluacion": {
+            "winner": "B",
+            "score_A": 4,
+            "score_B": 8,
+            "reason": "La respuesta B proporciona una explicación clara y concisa del cálculo de la prescripción de riego, incluyendo la estimación del coeficiente de cultivo (Kc) y la demanda hídrica calculada. La respuesta A, por otro lado, se centra en la fórmula general pero no proporciona una solución numérica clara y directa."
+        }
+    },
+    {
+        "id": 1,
+        "escenario": "Condiciones moderadas con algo de lluvia",
+        "input": "NDVI: 0.45, ET0: 4.0, Lluvia: 2.0",
+        "respuesta_base": "Para calcular la prescripción de riego, necesitamos considerar la relación entre el Índice de Vegetación por Diferencia Normalizada (NDVI) y la evapotranspiración potencial (ET0), así como la cantidad de lluvia recibida. \n\nLa fórmula general para la prescripción de riego es:\n\nPrescripción de riego = ET0 - (Lluvia + Lluvia residual)\n\nDonde:\n- ET0 es la evapotranspiración potencial, que es la cantidad de agua que el suelo y la vegetación perderían si no hubiera limitaciones de agua.\n- Lluvia es la cantidad de agua que ha caído en la zona.\n- Lluvia residual es la cantidad de agua que se almacena en el suelo y que puede ser utilizada por la planta en lugar de agua nueva.\n\nSin embargo, para calcular la prescripción de riego de manera más precisa, necesitamos considerar el NDVI, que es una medida de la salud y densidad de la vegetación. Un NDVI más alto indica una vegetación más saludable y densa, lo que puede requerir más agua.\n\nUna",
+        "respuesta_ft": "ANÁLISIS: Con un NDVI de 0.45, el coeficiente de cultivo (Kc) estimado es 0.79. La demanda hídrica calculada para 3 días (ET0 4.0mm * Kc * 3) es 9.2mm. Restando 2.0mm de lluvia acumulada, la PRESCRIPCIÓN FINAL es de 7mm.",
+        "evaluacion": {
+            "winner": "B",
+            "score_A": 4,
+            "score_B": 8,
+            "reason": "La respuesta B proporciona una explicación clara y concisa del cálculo de la prescripción de riego, incluyendo el coeficiente de cultivo (Kc) y la demanda hídrica calculada. La respuesta A, por otro lado, solo proporciona una fórmula general sin aplicarla a los datos específicos del escenario."
+        }
+    },
+    {
+        "id": 2,
+        "escenario": "Vigor alto, demanda alta",
+        "input": "NDVI: 0.8, ET0: 5.5, Lluvia: 0.0",
+        "respuesta_base": "Para calcular la prescripción de riego, necesitamos considerar varios factores, incluyendo el Índice de Vegetación por Diferencia Normalizada (NDVI), la evapotranspiración potencial (ET0) y la precipitación (lluvia) registrada. \n\nLa fórmula general para la prescripción de riego es:\n\nPrescripción de riego = ET0 - (precipitación + precipitación acumulada)\n\nSin embargo, para incorporar el NDVI, podemos utilizar una fórmula que considera la relación entre el NDVI y la evapotranspiración real (ETc) en lugar de la evapotranspiración potencial (ET0). Una fórmula común es:\n\nETc = ET0 * (NDVI / 100)\n\nLuego, la prescripción de riego se calcula como:\n\nPrescripción de riego = ETc - (precipitación + precipitación acumulada)\n\nDado que no se proporciona información sobre la precipitación acumulada, asumiremos que se refiere a la precipitación total registrada en el período de inter",
+        "respuesta_ft": "ANÁLISIS: Con un NDVI de 0.8, el coeficiente de cultivo (Kc) estimado es 1.1. La demanda hídrica calculada para 3 días (ET0 5.5mm * Kc * 3) es 18.3mm. Restando 0.0mm de lluvia acumulada, la PRESCRIPCIÓN FINAL es de 18mm.",
+        "evaluacion": {
+            "winner": "B",
+            "score_A": 4,
+            "score_B": 8,
+            "reason": "La respuesta B proporciona una explicación clara y concisa del cálculo de la prescripción de riego, incluyendo la estimación del coeficiente de cultivo (Kc) y la demanda hídrica calculada. La respuesta A, por otro lado, proporciona una fórmula general pero no llega a una conclusión numérica clara y concisa."
+        }
+    },
+    {
+        "id": 3,
+        "escenario": "Vigor medio, lluvia abundante",
+        "input": "NDVI: 0.6, ET0: 3.0, Lluvia: 10.0",
+        "respuesta_base": "Para calcular la prescripción de riego, necesitamos considerar la relación entre el Índice de Vegetación por Diferencia Normalizada (NDVI) y la evapotranspiración potencial (ET0), así como la cantidad de lluvia recibida. \n\nLa fórmula general para la prescripción de riego es:\n\nPrescripción de riego = ET0 - (Lluvia + Lluvia residual)\n\nDonde:\n\n- ET0 es la evapotranspiración potencial, que es la cantidad de agua que el suelo y la vegetación perderían si no hubiera limitaciones de agua.\n- Lluvia es la cantidad de agua caída en forma de lluvia.\n- Lluvia residual es la cantidad de agua que se almacena en el suelo y que puede ser utilizada por la planta en lugar de agua de riego.\n\nSin embargo, para calcular la prescripción de riego de manera más precisa, necesitamos considerar el NDVI, que es una medida de la salud y densidad de la vegetación. Un NDVI más alto indica una vegetación más saludable y densa, lo que puede requerir más agua",
+        "respuesta_ft": "ANÁLISIS: Con un NDVI de 0.6, el coeficiente de cultivo (Kc) estimado es 0.83. La demanda hídrica calculada para 3 días (ET0 3.0mm * Kc * 3) es 7.5mm. Restando 10.0mm de lluvia acumulada, la PRESCRIPCIÓN FINAL es de 0mm.",
+        "evaluacion": {
+            "winner": "B",
+            "score_A": 4,
+            "score_B": 9,
+            "reason": "La respuesta B proporciona una explicación clara y concisa del cálculo de la prescripción de riego, incluyendo la estimación del coeficiente de cultivo (Kc) y la demanda hídrica calculada. La respuesta A se centra en la fórmula general, pero no proporciona una respuesta numérica clara y concisa."
+        }
+    },
+    {
+        "id": 4,
+        "escenario": "Suelo seco, ola de calor",
+        "input": "NDVI: 0.3, ET0: 8.0, Lluvia: 0.0",
+        "respuesta_base": "Para calcular la prescripción de riego, necesitamos considerar la relación entre el Índice de Vegetación por Diferencia Normalizada (NDVI) y la evapotranspiración potencial (ET0), así como la cantidad de lluvia recibida. \n\nLa fórmula general para la prescripción de riego es:\n\nPrescripción de riego = ET0 - (Lluvia + Precipitación anteriores)\n\nSin embargo, para incorporar el NDVI, podemos utilizar una fórmula que considera la relación entre el NDVI y la ET0. Una fórmula común es:\n\nPrescripción de riego = ET0 * (1 - NDVI) - Lluvia\n\nEn este caso, tenemos:\n\n- NDVI = 0.3\n- ET0 = 8.0 mm\n- Lluvia = 0.0 mm\n\nSustituyendo estos valores en la fórmula, obtenemos:\n\nPrescripción de riego = 8.0 * (1 - 0.3) - 0.0\nPrescripción de riego = 8.0 * 0.7",
+        "respuesta_ft": "ANÁLISIS: Con un NDVI de 0.3, el coeficiente de cultivo (Kc) estimado es 0.59. La demanda hídrica calculada para 3 días (ET0 8.0mm * Kc * 3) es 14.4mm. Restando 0.0mm de lluvia acumulada, la PRESCRIPCIÓN FINAL es de 14mm.",
+        "evaluacion": {
+            "winner": "B",
+            "score_A": 4,
+            "score_B": 9,
+            "reason": "La respuesta B proporciona una explicación clara y concisa del cálculo de la prescripción de riego, incluyendo la estimación del coeficiente de cultivo (Kc) y la demanda hídrica calculada. La respuesta A, por otro lado, solo proporciona una fórmula sin explicación ni contexto adicional."
+        }
+    },
+    {
+        "id": 5,
+        "escenario": "Condiciones mixtas con lluvia moderada",
+        "input": "NDVI: 0.5, ET0: 6.0, Lluvia: 5.0",
+        "respuesta_base": "Para calcular la prescripción de riego, necesitamos considerar la relación entre el Índice de Vegetación por Diferencia Normalizada (NDVI) y la evapotranspiración potencial (ET0), así como la cantidad de lluvia recibida. \n\nLa fórmula general para la prescripción de riego es:\n\nPrescripción de riego = ET0 - (Lluvia + Lluvia acumulada)\n\nSin embargo, para incorporar el NDVI, podemos utilizar una fórmula ajustada que considera la salud y el estado del cultivo. Una fórmula común es:\n\nPrescripción de riego = ET0 * (1 - NDVI) - Lluvia\n\nEsta fórmula ajusta la prescripción de riego en función de la salud del cultivo, reflejada por el NDVI. Un NDVI más alto indica una vegetación más saludable y, por lo tanto, una menor necesidad de riego.\n\nSustituyendo los valores dados:\n\nPrescripción de riego = 6.0 * (1 - 0.5) - 5.0\nPrescripción de",
+        "respuesta_ft": "ANÁLISIS: Con un NDVI de 0.5, el coeficiente de cultivo (Kc) estimado es 0.73. La demanda hídrica calculada para 3 días (ET0 6.0mm * Kc * 3) es 13.4mm. Restando 5.0mm de lluvia acumulada, la PRESCRIPCIÓN FINAL es de 8mm.",
+        "evaluacion": {
+            "winner": "B",
+            "score_A": 4,
+            "score_B": 8,
+            "reason": "La respuesta B proporciona una explicación clara y concisa del cálculo de la prescripción de riego, incluyendo la estimación del coeficiente de cultivo (Kc) y la demanda hídrica calculada. La respuesta A, por otro lado, se centra en la fórmula general y no proporciona una explicación detallada del cálculo."
+        }
+    },
+    {
+        "id": 6,
+        "escenario": "Estrés hídrico extremo",
+        "input": "NDVI: 0.1, ET0: 9.0, Lluvia: 0.0",
+        "respuesta_base": "Para calcular la prescripción de riego, necesitamos considerar varios factores, incluyendo el Índice de Vegetación por Diferencia Normalizada (NDVI), la evapotranspiración potencial (ET0) y la precipitación (lluvia). \n\nEl NDVI es un indicador de la salud y densidad de la vegetación, y valores bajos indican condiciones de estrés hídrico. La ET0 es la cantidad de agua que una vegetación sana y bien nutrida perdería en un día, y es un indicador de la demanda hídrica de la vegetación. La precipitación (lluvia) es la cantidad de agua que cae en la zona en un período determinado.\n\nPara calcular la prescripción de riego, podemos utilizar la siguiente fórmula:\n\nPrescripción de riego = ET0 - (precipitación + agua almacenada en el suelo)\n\nSin embargo, para calcular la prescripción de riego de manera más precisa, podemos utilizar la siguiente fórmula:\n\nPrescripción de riego = ET0 * (1 - NDVI) + precipitación\n\nEsta fórm",
+        "respuesta_ft": "ANÁLISIS: Con un NDVI de 0.1, el coeficiente de cultivo (Kc) estimado es 0.52. La demanda hídrica calculada para 3 días (ET0 9.0mm * Kc * 3) es 14.4mm. Restando 0.0mm de lluvia acumulada, la PRESCRIPCIÓN FINAL es de 14mm.",
+        "evaluacion": {
+            "winner": "B",
+            "score_A": 4,
+            "score_B": 8,
+            "reason": "La respuesta B proporciona una solución práctica y numérica, mientras que la respuesta A se centra en la teoría y no llega a una conclusión clara. La respuesta B también utiliza el valor de Kc estimado, que es una consideración importante en la prescripción de riego."
+        }
+    },
+    {
+        "id": 7,
+        "escenario": "Vigor alto, sin lluvia",
+        "input": "NDVI: 0.7, ET0: 4.5, Lluvia: 0.0",
+        "respuesta_base": "Para calcular la prescripción de riego, necesitamos considerar la relación entre el Índice de Vegetación por Diferencia Normalizada (NDVI) y la evapotranspiración potencial (ET0), así como la cantidad de lluvia recibida. \n\nLa fórmula general para la prescripción de riego es:\n\nPrescripción de riego = ET0 * (1 - NDVI) * (1 - (Lluvia / ET0))\n\nDonde:\n- ET0 es la evapotranspiración potencial (mm)\n- NDVI es el Índice de Vegetación por Diferencia Normalizada (sin unidades)\n- Lluvia es la cantidad de lluvia recibida (mm)\n\nSustituyendo los valores dados:\n\nPrescripción de riego = 4.5 * (1 - 0.7) * (1 - (0.0 / 4.5))\n\nPrimero, calculamos el término entre paréntesis relacionado con la lluvia:\n(0.0 / 4.5) = 0.0\n\nLuego, calculamos el término entre paréntesis relacionado",
+        "respuesta_ft": "ANÁLISIS: Con un NDVI de 0.7, el coeficiente de cultivo (Kc) estimado es 0.98. La demanda hídrica calculada para 3 días (ET0 4.5mm * Kc * 3) es 13.3mm. Restando 0.0mm de lluvia acumulada, la PRESCRIPCIÓN FINAL es de 13mm.",
+        "evaluacion": {
+            "winner": "B",
+            "score_A": 4,
+            "score_B": 9,
+            "reason": "La respuesta B proporciona una explicación clara y concisa del cálculo de la prescripción de riego, incluyendo la estimación del coeficiente de cultivo (Kc) y la demanda hídrica calculada. La respuesta A, por otro lado, se centra en la fórmula general sin proporcionar una explicación clara del cálculo de Kc y la demanda hídrica."
+        }
+    },
+    {
+        "id": 8,
+        "escenario": "Vigor medio-alto con algo de lluvia",
+        "input": "NDVI: 0.55, ET0: 5.0, Lluvia: 3.0",
+        "respuesta_base": "Para calcular la prescripción de riego, necesitamos considerar la relación entre el Índice de Vegetación por Diferencia Normalizada (NDVI) y la evapotranspiración potencial (ET0), así como la cantidad de lluvia recibida. \n\nLa fórmula general para la prescripción de riego es:\n\nPrescripción de riego = ET0 - (Lluvia + Lluvia acumulada)\n\nDonde:\n\n- ET0 es la evapotranspiración potencial, que es la cantidad de agua que el suelo y la vegetación perderían si no hubiera limitaciones de agua.\n- Lluvia es la cantidad de agua caída en forma de lluvia en un período determinado.\n- Lluvia acumulada es la cantidad de agua que se ha acumulado en el suelo a través de las lluvias anteriores.\n\nSin embargo, para calcular la prescripción de riego de manera sencilla, podemos utilizar una aproximación que considera el NDVI y la relación entre la evapotranspiración potencial y la lluvia. Una fórmula aproximada es:\n\nPrescripción de r",
+        "respuesta_ft": "ANÁLISIS: Con un NDVI de 0.55, el coeficiente de cultivo (Kc) estimado es 0.83. La demanda hídrica calculada para 3 días (ET0 5.0mm * Kc * 3) es 12.4mm. Restando 3.0mm de lluvia acumulada, la PRESCRIPCIÓN FINAL es de 9mm.",
+        "evaluacion": {
+            "winner": "B",
+            "score_A": 4,
+            "score_B": 8,
+            "reason": "La respuesta B proporciona una explicación clara y concisa del cálculo de la prescripción de riego, incluyendo la estimación del coeficiente de cultivo (Kc) y la demanda hídrica calculada. La respuesta A, por otro lado, se centra en la fórmula general de la prescripción de riego, pero no proporciona una respuesta numérica clara y directa."
+        }
+    },
+    {
+        "id": 9,
+        "escenario": "Estrés hídrico moderado con poca lluvia",
+        "input": "NDVI: 0.25, ET0: 7.0, Lluvia: 1.0",
+        "respuesta_base": "Para calcular la prescripción de riego, necesitamos considerar la relación entre el Índice de Vegetación por Diferencia Normalizada (NDVI) y la evapotranspiración potencial (ET0), así como la precipitación reciente. \n\nLa fórmula general para la prescripción de riego es:\n\nPrescripción de riego = ET0 * (1 - NDVI) * (1 - (precipitación reciente / ET0))\n\nDonde:\n- ET0 es la evapotranspiración potencial, que es la cantidad de agua que el suelo y la vegetación perderían si no hubiera limitaciones de agua.\n- NDVI es el Índice de Vegetación por Diferencia Normalizada, que varía entre 0 y 1, donde 0 representa suelo desnudo y 1 representa vegetación muy densa.\n- Precipitación reciente es la cantidad de agua que ha caído en el área en un período determinado.\n\nSustituyendo los valores dados:\n\nPrescripción de riego = 7.0 * (1 - 0.25) * (1 - (1.",
+        "respuesta_ft": "ANÁLISIS: Con un NDVI de 0.25, el coeficiente de cultivo (Kc) estimado es 0.62. La demanda hídrica calculada para 3 días (ET0 7.0mm * Kc * 3) es 13.1mm. Restando 1.0mm de lluvia acumulada, la PRESCRIPCIÓN FINAL es de 12mm.",
+        "evaluacion": {
+            "winner": "B",
+            "score_A": 4,
+            "score_B": 8,
+            "reason": "La respuesta B proporciona una explicación clara y concisa del cálculo de la prescripción de riego, incluyendo la estimación del coeficiente de cultivo (Kc) y la demanda hídrica calculada. La respuesta A, por otro lado, solo proporciona una fórmula general sin aplicarla a los datos específicos del escenario."
+        }
+    },
+    {
+        "id": 10,
+        "escenario": "Vigor alto, demanda moderada",
+        "input": "NDVI: 0.65, ET0: 4.0, Lluvia: 0.0",
+        "respuesta_base": "Para calcular la prescripción de riego, necesitamos considerar la relación entre el Índice de Vegetación por Diferencia Normalizada (NDVI) y la evapotranspiración potencial (ET0), así como la cantidad de lluvia recibida. \n\nLa fórmula general para la prescripción de riego es:\n\nPrescripción de riego = ET0 * (1 - NDVI) * (1 - (lluvia / ET0))\n\nDonde:\n- ET0 es la evapotranspiración potencial (mm)\n- NDVI es el Índice de Vegetación por Diferencia Normalizada (sin unidades)\n- Lluvia es la cantidad de lluvia recibida (mm)\n\nSustituyendo los valores dados:\n\nPrescripción de riego = 4.0 * (1 - 0.65) * (1 - (0.0 / 4.0))\n\nPrimero, calculamos el término entre paréntesis relacionado con la NDVI:\n(1 - 0.65) = 0.35\n\nLuego, calculamos el término relacionado con la lluvia:\n(0",
+        "respuesta_ft": "ANÁLISIS: Con un NDVI de 0.65, el coeficiente de cultivo (Kc) estimado es 0.92. La demanda hídrica calculada para 3 días (ET0 4.0mm * Kc * 3) es 11.2mm. Restando 0.0mm de lluvia acumulada, la PRESCRIPCIÓN FINAL es de 11mm.",
+        "evaluacion": {
+            "winner": "B",
+            "score_A": 4,
+            "score_B": 9,
+            "reason": "La respuesta B proporciona una explicación clara y concisa del cálculo de la prescripción de riego, incluyendo la estimación del coeficiente de cultivo (Kc) y la demanda hídrica calculada. La respuesta A, por otro lado, se centra en la fórmula general y no proporciona una explicación clara de cómo se aplica a la situación específica."
+        }
+    },
+    {
+        "id": 11,
+        "escenario": "Vigor medio, alta demanda",
+        "input": "NDVI: 0.4, ET0: 6.5, Lluvia: 0.0",
+        "respuesta_base": "Para calcular la prescripción de riego, necesitamos considerar la relación entre el Índice de Vegetación por Diferencia Normalizada (NDVI) y la evapotranspiración potencial (ET0), así como la cantidad de lluvia recibida. \n\nLa fórmula general para la prescripción de riego es:\n\nPrescripción de riego = ET0 - (Lluvia + Precipitación anteriores)\n\nSin embargo, para incorporar el NDVI, podemos utilizar una fórmula que considera la relación entre el NDVI y la ET0. Una forma sencilla de hacerlo es:\n\nPrescripción de riego = ET0 * (1 - NDVI) - Lluvia\n\nEn este caso, tenemos:\n\n- NDVI = 0.4\n- ET0 = 6.5 mm\n- Lluvia = 0.0 mm\n\nSustituyendo estos valores en la fórmula, obtenemos:\n\nPrescripción de riego = 6.5 * (1 - 0.4) - 0.0\nPrescripción de riego = 6.5 * 0.",
+        "respuesta_ft": "ANÁLISIS: Con un NDVI de 0.4, el coeficiente de cultivo (Kc) estimado es 0.69. La demanda hídrica calculada para 3 días (ET0 6.5mm * Kc * 3) es 13.4mm. Restando 0.0mm de lluvia acumulada, la PRESCRIPCIÓN FINAL es de 13mm.",
+        "evaluacion": {
+            "winner": "B",
+            "score_A": 4,
+            "score_B": 8,
+            "reason": "La respuesta B proporciona una explicación clara y concisa del cálculo de la prescripción de riego, incluyendo la estimación del coeficiente de cultivo (Kc) y la demanda hídrica calculada. La respuesta A, por otro lado, se centra en la fórmula general pero no proporciona una explicación clara del cálculo de Kc y la demanda hídrica."
+        }
+    },
+    {
+        "id": 12,
+        "escenario": "Vigor alto con lluvia significativa",
+        "input": "NDVI: 0.75, ET0: 3.5, Lluvia: 8.0",
+        "respuesta_base": "Para calcular la prescripción de riego, necesitamos considerar la relación entre el Índice de Vegetación por Diferencia Normalizada (NDVI) y la evapotranspiración potencial (ET0), así como la cantidad de lluvia recibida. \n\nLa fórmula general para la prescripción de riego es:\n\nPrescripción de riego = (ET0 - Lluvia) / (1 + NDVI)\n\nPrimero, debemos calcular la diferencia entre la evapotranspiración potencial (ET0) y la cantidad de lluvia recibida. \n\nET0 - Lluvia = 3.5mm - 8.0mm = -4.5mm\n\nLuego, dividimos esta diferencia por (1 + NDVI):\n\nPrescripción de riego = (-4.5mm) / (1 + 0.75)\nPrescripción de riego = (-4.5mm) / 1.75\nPrescripción de riego = -2.57mm\n\nSin embargo, la prescripción de riego no puede ser negativa, ya que no se puede aplicar riego negativo. En la práctica",
+        "respuesta_ft": "ANÁLISIS: Con un NDVI de 0.75, el coeficiente de cultivo (Kc) estimado es 1.00. La demanda hídrica calculada para 3 días (ET0 3.5mm * Kc * 3) es 10.2mm. Restando 8.0mm de lluvia acumulada, la PRESCRIPCIÓN FINAL es de 2mm.",
+        "evaluacion": {
+            "winner": "B",
+            "score_A": 4,
+            "score_B": 8,
+            "reason": "La respuesta B proporciona una explicación clara y concisa del cálculo de la prescripción de riego, incluyendo la estimación del coeficiente de cultivo (Kc) y la demanda hídrica calculada. La respuesta A, por otro lado, presenta un cálculo incorrecto y no proporciona una prescripción de riego clara."
+        }
+    },
+    {
+        "id": 13,
+        "escenario": "Estrés hídrico moderado con algo de lluvia",
+        "input": "NDVI: 0.35, ET0: 7.0, Lluvia: 2.0",
+        "respuesta_base": "Para calcular la prescripción de riego, necesitamos considerar la relación entre el Índice de Vegetación por Diferencia Normalizada (NDVI) y la evapotranspiración potencial (ET0), así como la precipitación reciente (lluvia). \n\nLa fórmula general para la prescripción de riego es:\n\nPrescripción de riego = ET0 - (NDVI * ET0) + Lluvia\n\nPrimero, debemos calcular el valor de NDVI * ET0, que es:\n\nNDVI * ET0 = 0.35 * 7.0mm = 2.45mm\n\nLuego, podemos sustituir este valor en la fórmula:\n\nPrescripción de riego = 7.0mm - 2.45mm + 2.0mm\n\nPrescripción de riego = 6.55mm\n\nPor lo tanto, la prescripción de riego es de 6.55mm. \n\nTen en cuenta que esta es una aproximación simplificada y en la práctica, la prescripción de riego puede ser más compleja y considerar otros factores como la edad del",
+        "respuesta_ft": "ANÁLISIS: Con un NDVI de 0.35, el coeficiente de cultivo (Kc) estimado es 0.73. La demanda hídrica calculada para 3 días (ET0 7.0mm * Kc * 3) es 15.4mm. Restando 2.0mm de lluvia acumulada, la PRESCRIPCIÓN FINAL es de 13mm.",
+        "evaluacion": {
+            "winner": "B",
+            "score_A": 4,
+            "score_B": 8,
+            "reason": "La respuesta A es demasiado simplificada y no proporciona una explicación clara del cálculo de la prescripción de riego. La respuesta B, por otro lado, proporciona una explicación detallada del cálculo de Kc y la demanda hídrica, lo que la convierte en la opción más precisa y útil para el agricultor."
+        }
+    },
+    {
+        "id": 14,
+        "escenario": "Vigor muy alto sin lluvia",
+        "input": "NDVI: 0.85, ET0: 4.5, Lluvia: 0.0",
+        "respuesta_base": "Para calcular la prescripción de riego, necesitamos considerar varios factores, incluyendo el Índice de Vegetación por Diferencia Normalizada (NDVI), la evapotranspiración potencial (ET0) y la precipitación (lluvia). A continuación, te proporcionaré los pasos para calcular la prescripción de riego:\n\n1. **NDVI (Índice de Vegetación por Diferencia Normalizada):** El NDVI es una medida de la salud y densidad de la vegetación. Un valor alto indica una vegetación saludable y densa, mientras que un valor bajo indica una vegetación débil o escasa. En este caso, el NDVI es de 0.85, lo que sugiere una vegetación saludable.\n\n2. **ET0 (Evapotranspiración potencial):** La ET0 es la cantidad de agua que una vegetación saludable y bien irrigada perdería en un día, considerando la evaporación y la transpiración. En este caso, la ET0 es de 4.5 mm, lo que significa que la vegetación perdería 4.5 mm de agua en un día",
+        "respuesta_ft": "ANÁLISIS: Con un NDVI de 0.85, el coeficiente de cultivo (Kc) estimado es 1.09. La demanda hídrica calculada para 3 días (ET0 4.5mm * Kc * 3) es 14.5mm. Restando 0.0mm de lluvia acumulada, la PRESCRIPCIÓN FINAL es de 14mm.",
+        "evaluacion": {
+            "winner": "B",
+            "score_A": 4,
+            "score_B": 8,
+            "reason": "La respuesta B proporciona una explicación clara y concisa del cálculo de la prescripción de riego, incluyendo el coeficiente de cultivo (Kc) y la demanda hídrica calculada. La respuesta A se centra en la definición de los términos pero no proporciona una conclusión numérica clara."
+        }
+    },
+    {
+        "id": 15,
+        "escenario": "Vigor medio con lluvia moderada",
+        "input": "NDVI: 0.5, ET0: 5.5, Lluvia: 4.0",
+        "respuesta_base": "Para calcular la prescripción de riego, necesitamos considerar la relación entre el Índice de Vegetación por Diferencia Normalizada (NDVI) y la evapotranspiración potencial (ET0), así como la cantidad de lluvia recibida. \n\nLa fórmula general para la prescripción de riego es:\n\nPrescripción de riego = (ET0 - Lluvia) / (1 + NDVI)\n\nPrimero, calculamos la diferencia entre la evapotranspiración potencial (ET0) y la cantidad de lluvia recibida:\n\nET0 - Lluvia = 5.5mm - 4.0mm = 1.5mm\n\nLuego, introducimos los valores en la fórmula:\n\nPrescripción de riego = (1.5mm) / (1 + 0.5)\n\nPrescripción de riego = 1.5mm / 1.5\n\nPrescripción de riego = 1mm\n\nLa prescripción de riego es de 1mm. \n\nTen en cuenta que esta es una aproximación simplificada y en la práctica, la prescripción",
+        "respuesta_ft": "ANÁLISIS: Con un NDVI de 0.5, el coeficiente de cultivo (Kc) estimado es 0.73. La demanda hídrica calculada para 3 días (ET0 5.5mm * Kc * 3) es 12.1mm. Restando 4.0mm de lluvia acumulada, la PRESCRIPCIÓN FINAL es de 8mm.",
+        "evaluacion": {
+            "winner": "B",
+            "score_A": 4,
+            "score_B": 9,
+            "reason": "La respuesta B proporciona una explicación detallada del cálculo de Kc y la demanda hídrica, lo que la convierte en más precisa y útil para el agricultor. Además, la respuesta B proporciona una prescripción de riego clara y concreta, en lugar de una fórmula general que requiere más información."
+        }
+    },
+    {
+        "id": 16,
+        "escenario": "Estrés hídrico severo con ola de calor",
+        "input": "NDVI: 0.15, ET0: 8.5, Lluvia: 0.0",
+        "respuesta_base": "Para calcular la prescripción de riego, necesitamos considerar la relación entre el Índice de Vegetación por Diferencia Normalizada (NDVI) y la evapotranspiración potencial (ET0), así como la precipitación reciente. \n\nLa fórmula general para la prescripción de riego es:\n\nPrescripción de riego = ET0 * (1 - NDVI) * (1 - (precipitación reciente / ET0))\n\nDonde:\n- ET0 es la evapotranspiración potencial, que es la cantidad de agua que el suelo y la vegetación perderían si no hubiera limitaciones de agua.\n- NDVI es el Índice de Vegetación por Diferencia Normalizada, que varía entre -1 y 1, y es una medida de la salud y densidad de la vegetación.\n- Precipitación reciente es la cantidad de agua que ha caído en el área en un período determinado.\n\nSustituyendo los valores dados:\n\nPrescripción de riego = 8.5 * (1 - 0.15) * (1 - (0.0 /",
+        "respuesta_ft": "ANÁLISIS: Con un NDVI de 0.15, el coeficiente de cultivo (Kc) estimado es 0.52. La demanda hídrica calculada para 3 días (ET0 8.5mm * Kc * 3) es 13.4mm. Restando 0.0mm de lluvia acumulada, la PRESCRIPCIÓN FINAL es de 13mm.",
+        "evaluacion": {
+            "winner": "B",
+            "score_A": 4,
+            "score_B": 8,
+            "reason": "La respuesta B proporciona una explicación clara y concisa del cálculo de la prescripción de riego, incluyendo la estimación del coeficiente de cultivo (Kc) y la demanda hídrica calculada. La respuesta A, por otro lado, solo proporciona una fórmula general sin aplicarla a los datos específicos del escenario."
+        }
+    },
+    {
+        "id": 17,
+        "escenario": "Vigor medio-alto sin lluvia",
+        "input": "NDVI: 0.6, ET0: 4.0, Lluvia: 0.0",
+        "respuesta_base": "Para calcular la prescripción de riego, necesitamos considerar la relación entre el Índice de Vegetación por Diferencia Normalizada (NDVI) y la evapotranspiración potencial (ET0), así como la cantidad de lluvia recibida. \n\nLa fórmula general para la prescripción de riego es:\n\nPrescripción de riego = ET0 * (1 - NDVI) * (1 - (Lluvia / ET0))\n\nDonde:\n- ET0 es la evapotranspiración potencial (mm)\n- NDVI es el Índice de Vegetación por Diferencia Normalizada (sin unidades)\n- Lluvia es la cantidad de lluvia recibida (mm)\n\nSustituyendo los valores dados:\n\nPrescripción de riego = 4.0 * (1 - 0.6) * (1 - (0.0 / 4.0))\n\nPrimero, calculamos el término entre paréntesis relacionado con la lluvia, que es 0.0 / 4.0 = 0.0\n\nLuego, calculamos el término entre paréntesis relacion",
+        "respuesta_ft": "ANÁLISIS: Con un NDVI de 0.6, el coeficiente de cultivo (Kc) estimado es 0.83. La demanda hídrica calculada para 3 días (ET0 4.0mm * Kc * 3) es 10.1mm. Restando 0.0mm de lluvia acumulada, la PRESCRIPCIÓN FINAL es de 10mm.",
+        "evaluacion": {
+            "winner": "B",
+            "score_A": 4,
+            "score_B": 9,
+            "reason": "La respuesta B proporciona una explicación clara y concisa del cálculo de la prescripción de riego, incluyendo la estimación del coeficiente de cultivo (Kc) y la demanda hídrica calculada. La respuesta A, por otro lado, se centra en la fórmula general pero no proporciona una explicación clara del cálculo de Kc y la demanda hídrica."
+        }
+    },
+    {
+        "id": 18,
+        "escenario": "Vigor medio con algo de lluvia",
+        "input": "NDVI: 0.45, ET0: 6.0, Lluvia: 1.0",
+        "respuesta_base": "Para calcular la prescripción de riego, necesitamos considerar la relación entre el Índice de Vegetación por Diferencia Normalizada (NDVI) y la evapotranspiración potencial (ET0), así como la precipitación reciente (lluvia). \n\nLa fórmula general para la prescripción de riego es:\n\nPrescripción de riego = ET0 - (NDVI * ET0) + Lluvia\n\nPrimero, debemos calcular el valor de NDVI * ET0, que es 0.45 * 6.0 = 2.7 mm.\n\nLuego, restamos este valor de ET0 para obtener la parte de riego necesaria: 6.0 - 2.7 = 3.3 mm.\n\nFinalmente, sumamos la precipitación reciente (lluvia) para obtener la prescripción de riego total: 3.3 + 1.0 = 4.3 mm.\n\nPor lo tanto, la prescripción de riego es de 4.3 mm. \n\nLa respuesta final es 4.3. \n\nSi necesitas más detalles sobre cómo se calcula la prescri",
+        "respuesta_ft": "ANÁLISIS: Con un NDVI de 0.45, el coeficiente de cultivo (Kc) estimado es 0.79. La demanda hídrica calculada para 3 días (ET0 6.0mm * Kc * 3) es 14.2mm. Restando 1.0mm de lluvia acumulada, la PRESCRIPCIÓN FINAL es de 13mm.",
+        "evaluacion": {
+            "winner": "B",
+            "score_A": 6,
+            "score_B": 9,
+            "reason": "La respuesta B proporciona una explicación detallada del cálculo de Kc y la demanda hídrica, lo que la hace más precisa y confiable. Además, la respuesta B proporciona una prescripción de riego clara y numérica, mientras que la respuesta A se centra en la fórmula general sin explicar los pasos detallados del cálculo."
+        }
+    },
+    {
+        "id": 19,
+        "escenario": "Vigor alto sin lluvia",
+        "input": "NDVI: 0.8, ET0: 5.0, Lluvia: 0.0",
+        "respuesta_base": "Para calcular la prescripción de riego, necesitamos considerar la relación entre el Índice de Vegetación por Diferencia Normalizada (NDVI) y la evapotranspiración potencial (ET0), así como la cantidad de lluvia recibida. \n\nLa fórmula general para la prescripción de riego es:\n\nPrescripción de riego = ET0 - (Lluvia + Precipitación anteriores)\n\nSin embargo, para incorporar el NDVI, podemos utilizar una fórmula que ajusta la ET0 según el estado de la vegetación. Una forma sencilla de hacerlo es mediante la siguiente fórmula:\n\nPrescripción de riego = ET0 * (1 - NDVI) - Lluvia\n\nDonde ET0 es la evapotranspiración potencial, NDVI es el índice de vegetación por diferencia normalizada y Lluvia es la cantidad de lluvia recibida.\n\nSustituyendo los valores dados:\n\nPrescripción de riego = 5.0 * (1 - 0.8) - 0.0\nPrescripción de riego = 5.",
+        "respuesta_ft": "ANÁLISIS: Con un NDVI de 0.8, el coeficiente de cultivo (Kc) estimado es 1.1. La demanda hídrica calculada para 3 días (ET0 5.0mm * Kc * 3) es 16.3mm. Restando 0.0mm de lluvia acumulada, la PRESCRIPCIÓN FINAL es de 16mm.",
+        "evaluacion": {
+            "winner": "B",
+            "score_A": 4,
+            "score_B": 9,
+            "reason": "La respuesta B proporciona una explicación clara y detallada del cálculo de la prescripción de riego, incluyendo la estimación del coeficiente de cultivo (Kc) y la demanda hídrica calculada. La respuesta A, por otro lado, solo proporciona una fórmula general sin explicación detallada ni cálculo específico. Además, la respuesta B proporciona una prescripción de riego concreta (16mm), mientras que la respuesta A solo proporciona una fórmula sin resultado numérico."
+        }
+    }
+]

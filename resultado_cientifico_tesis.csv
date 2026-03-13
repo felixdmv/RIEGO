@@ -1,0 +1,21 @@
+Escenario,GT,Base_Pred,FT_Pred,Error_Base,Error_FT,Winner
+Estrés hídrico severo,13,0.0,6.0,13.0,7.0,FINE-TUNED
+Condiciones moderadas con algo de lluvia,7,0.0,6.0,7.0,1.0,FINE-TUNED
+"Vigor alto, demanda alta",17,0.0,6.0,17.0,11.0,FINE-TUNED
+"Vigor medio, lluvia abundante",0,0.0,0.0,0.0,0.0,EMPATE
+"Suelo seco, ola de calor",15,0.0,10.0,15.0,5.0,FINE-TUNED
+Condiciones mixtas con lluvia moderada,9,0.0,0.0,9.0,9.0,EMPATE
+Estrés hídrico extremo,13,0.0,0.0,13.0,13.0,EMPATE
+"Vigor alto, sin lluvia",13,0.0,6.0,13.0,7.0,FINE-TUNED
+Vigor medio-alto con algo de lluvia,10,0.0,0.0,10.0,10.0,EMPATE
+Estrés hídrico moderado con poca lluvia,12,0.0,0.0,12.0,12.0,EMPATE
+"Vigor alto, demanda moderada",11,0.0,6.0,11.0,5.0,FINE-TUNED
+"Vigor medio, alta demanda",14,0.0,10.0,14.0,4.0,FINE-TUNED
+Vigor alto con lluvia significativa,2,0.0,0.0,2.0,2.0,EMPATE
+Estrés hídrico moderado con algo de lluvia,12,0.0,0.0,12.0,12.0,EMPATE
+Vigor muy alto sin lluvia,15,0.0,10.0,15.0,5.0,FINE-TUNED
+Vigor medio con lluvia moderada,9,0.0,0.0,9.0,9.0,EMPATE
+Estrés hídrico severo con ola de calor,13,0.0,10.0,13.0,3.0,FINE-TUNED
+Vigor medio-alto sin lluvia,11,0.0,0.0,11.0,11.0,EMPATE
+Vigor medio con algo de lluvia,13,0.0,0.0,13.0,13.0,EMPATE
+Vigor alto sin lluvia,16,0.0,6.0,16.0,10.0,FINE-TUNED
