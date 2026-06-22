@@ -1,0 +1,14 @@
+compute_environment: LOCAL_MACHINE
+debug: false
+deepspeed_config:
+  deepspeed_config_file: runs/qwen3_vl_32b_qlora/configs/deepspeed_zero3.json
+  zero3_init_flag: true
+distributed_type: DEEPSPEED
+downcast_bf16: 'no'
+mixed_precision: bf16
+num_machines: 1
+num_processes: 3
+machine_rank: 0
+main_training_function: main
+same_network: true
+use_cpu: false
