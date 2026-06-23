@@ -40,17 +40,109 @@ logger.info(f"Using device: {device}")
 class AgroDataManager:
     def __init__(self, base_path='datos/canduela'):
         self.base_path = base_path
-        self.area_s3 = 40650  # m2
-        self.archivos_sensores = ['DATOSE_1.csv', 'DATOSE_2.csv', 'DATOSE_3.csv']
-        self.archivo_riegos = 'RIEGOS_1.csv'
-        self.archivo_aemet = 'AEMET_Sardon_historico.csv'
-        self.archivos_sat = {
-            'Sat_NDVI': 'satelite/Sentinel2_NDVI_Parcela_Real.csv',
-            'Sat_Radar': 'satelite/Sentinel1_Radar_Parcela_Real.csv',
-            'Sat_LST': 'satelite/MODIS_Temp_Parcela_Real.csv'
-        }
+        if 'carralancha' in base_path:
+            self.area_s3 = 22357.87  # m2 for Sector V4
+            self.archivo_aemet = 'AEMET_Rueda_historico.csv'
+            self.archivos_sensores = ['CLIMA_CARRALANCHA_sensor_unificado.csv']
+            self.archivos_sat = {
+                'Sat_NDVI': 'satelite/Sentinel2_NDVI_Parcela_Real.csv',
+                'Sat_Radar': 'satelite/Sentinel1_Radar_Parcela_Real.csv',
+                'Sat_LST': 'satelite/MODIS_Temp_Parcela_Real.csv'
+            }
+        else:
+            self.area_s3 = 40650  # m2 for Sector S3
+            self.archivos_sensores = ['DATOSE_1.csv', 'DATOSE_2.csv', 'DATOSE_3.csv']
+            self.archivo_riegos = 'RIEGOS_1.csv'
+            self.archivo_aemet = 'AEMET_Sardon_historico.csv'
+            self.archivos_sat = {
+                'Sat_NDVI': 'satelite/Sentinel2_NDVI_Parcela_Real.csv',
+                'Sat_Radar': 'satelite/Sentinel1_Radar_Parcela_Real.csv',
+                'Sat_LST': 'satelite/MODIS_Temp_Parcela_Real.csv'
+            }
 
     def process_all(self):
+        if 'carralancha' in self.base_path:
+            logger.info("Fase 1 (Carralancha): Cargando y consolidando datos...")
+            # Clima
+            clima_path = os.path.join(self.base_path, "CLIMA_CARRALANCHA_sensor_unificado.csv")
+            df_sensor = pd.read_csv(clima_path)
+            df_sensor['Fecha'] = pd.to_datetime(df_sensor['Fecha'])
+            df_clima = df_sensor.set_index('Fecha').resample('D').agg({
+                'Temperatura': 'mean',
+                'Radiación solar': 'mean',
+                'Precipitaciones': 'sum'
+            }).reset_index()
+            df_clima['ET0_Calculada'] = 0.0135 * (df_clima['Temperatura'] + 17.8) * (df_clima['Radiación solar'] * 0.035)
+
+            # Crop / Soil / Irrigation
+            crop_path = os.path.join(self.base_path, "CARRALANCHA_ALMENDRO_V4_unificado.csv")
+            df_crop_raw = pd.read_csv(crop_path)
+            df_crop_raw['Fecha'] = pd.to_datetime(df_crop_raw['Fecha'])
+            df_crop_daily = df_crop_raw.set_index('Fecha').resample('D').agg({
+                'Contenido volumétrico (10 cm)': 'mean',
+                'Contenido volumétrico (20 cm)': 'mean',
+                'Contenido volumétrico (40 cm)': 'mean',
+                'Contenido volumétrico (60 cm)': 'mean',
+                'Potencial hídrico (almendra)': 'min',
+                'Baseline potencial hídrico (almendra)': 'min',
+                'Riego (cantidad total)': 'sum'
+            }).reset_index()
+            df_crop_daily = df_crop_daily.rename(columns={
+                'Contenido volumétrico (10 cm)': 'FP_Humedad_10cm',
+                'Contenido volumétrico (20 cm)': 'FP_Humedad_20cm',
+                'Contenido volumétrico (40 cm)': 'FP_Humedad_40cm',
+                'Contenido volumétrico (60 cm)': 'FP_Humedad_60cm',
+                'Potencial hídrico (almendra)': 'FP_Potencial_Min',
+                'Baseline potencial hídrico (almendra)': 'FP_Potencial_Base_Min',
+                'Riego (cantidad total)': 'Riego_m3_Real'
+            })
+            df_crop_daily['Riego_mm_Real'] = (df_crop_daily['Riego_m3_Real'] * 1000) / self.area_s3
+            if df_crop_daily['FP_Potencial_Min'].isna().all():
+                df_crop_daily['FP_Potencial_Min'] = -1.5
+            if df_crop_daily['FP_Potencial_Base_Min'].isna().all():
+                df_crop_daily['FP_Potencial_Base_Min'] = -0.8
+
+            # AEMET
+            path_aemet = os.path.join(self.base_path, self.archivo_aemet)
+            df_aemet = pd.read_csv(path_aemet, parse_dates=['Fecha']).sort_values('Fecha')
+            df_aemet['Lluvia_Prevista_3d'] = df_aemet['Lluvia_AEMET'].shift(-1).rolling(3, min_periods=1).sum().shift(-2).fillna(0)
+
+            # Merge
+            df_master = pd.merge(df_clima, df_aemet[['Fecha', 'Lluvia_Prevista_3d', 'Lluvia_AEMET']], on='Fecha', how='outer')
+            df_master = pd.merge(df_master, df_crop_daily, on='Fecha', how='outer')
+            df_master = df_master.sort_values('Fecha').reset_index(drop=True)
+
+            # Ingest Sat
+            for col, rel_path in self.archivos_sat.items():
+                path_sat = os.path.join(self.base_path, rel_path)
+                if os.path.exists(path_sat):
+                    df_sat = pd.read_csv(path_sat, parse_dates=['Fecha']).rename(columns={'Valor': col})
+                    df_master = pd.merge(df_master, df_sat[['Fecha', col]], on='Fecha', how='left')
+                    df_master[col] = pd.to_numeric(df_master[col], errors='coerce')
+                else:
+                    df_master[col] = np.nan
+
+            df_master = df_master[(df_master['Fecha'] >= '2022-01-01') & (df_master['Fecha'] <= '2025-12-31')].reset_index(drop=True)
+            df_master['Riego_mm_Real'] = df_master['Riego_mm_Real'].fillna(0)
+            df_master['Lluvia_AEMET'] = df_master['Lluvia_AEMET'].fillna(0)
+            df_master['Lluvia_Prevista_3d'] = df_master['Lluvia_Prevista_3d'].fillna(0)
+            df_master['Precipitaciones'] = df_master['Precipitaciones'].fillna(0)
+
+            cols_to_interpolate = ['Temperatura', 'Radiación solar', 'ET0_Calculada',
+                                   'FP_Humedad_10cm', 'FP_Humedad_20cm', 'FP_Humedad_40cm', 'FP_Humedad_60cm',
+                                   'FP_Potencial_Min', 'FP_Potencial_Base_Min', 'Sat_NDVI', 'Sat_Radar', 'Sat_LST']
+            for col in cols_to_interpolate:
+                df_master[col] = df_master[col].interpolate(method='linear', limit_direction='both')
+                df_master[col] = df_master[col].bfill().ffill()
+
+            df_master['Kc_Dinamico'] = 0.4 + (df_master['Sat_NDVI'] * 0.8)
+            df_master['ETc_Sector3'] = df_master['ET0_Calculada'] * df_master['Kc_Dinamico']
+
+            final_path = os.path.join(self.base_path, 'Dataset_Final_V4.csv')
+            df_master.to_csv(final_path, index=False)
+            logger.info(f"Dataset consolidado final Carralancha V4 guardado en {final_path}. Filas: {len(df_master)}")
+            return df_master
+
         logger.info("Fase 1: Cargando y consolidando datos (Sensores, AEMET, Riegos, Satélites, FloraPulse)...")
 
         # 1. Sensors Data
@@ -368,6 +460,9 @@ class AgroLLMOptimizer:
         self.base_model_id = base_model_id
         self.save_adapter_path = save_adapter_path
         self.base_path = base_path
+        self.is_carralancha = 'carralancha' in base_path
+        self.sector_name = "Sector V4" if self.is_carralancha else "Sector 3"
+        self.dataset_cot_name = 'dataset_cot_v4.jsonl' if self.is_carralancha else 'dataset_cot_s3.jsonl'
 
     @staticmethod
     def _classify_stress(pot):
@@ -433,12 +528,12 @@ class AgroLLMOptimizer:
             )
             
             dataset_llm.append({
-                "instruction": "Audita la eficiencia del riego e indica prescripción agronómica detallada para el Sector 3 (Almendro).",
+                "instruction": f"Audita la eficiencia del riego e indica prescripción agronómica detallada para el {self.sector_name} (Almendro).",
                 "input": input_text,
                 "output": output_text
             })
 
-        jsonl_path = os.path.join(self.base_path, 'dataset_cot_s3.jsonl')
+        jsonl_path = os.path.join(self.base_path, self.dataset_cot_name)
         with open(jsonl_path, 'w', encoding='utf-8') as f:
             for entry in dataset_llm:
                 f.write(json.dumps(entry, ensure_ascii=False) + '\n')
@@ -477,7 +572,7 @@ class AgroLLMOptimizer:
         model = get_peft_model(base_model, peft_config)
 
         # Load dataset
-        ds = HFDataset.from_json(os.path.join(self.base_path, 'dataset_cot_s3.jsonl'))
+        ds = HFDataset.from_json(os.path.join(self.base_path, self.dataset_cot_name))
         
         def tokenize(batch):
             texts = [
@@ -557,12 +652,26 @@ class AgroPDF(FPDF):
 class AgroProductionReport:
     def __init__(self, model_dl_path='models/modelo_percepcion_s3.pt', base_model_id='meta-llama/Llama-3.2-1B-Instruct', adapter_path='models/agro_llama_1b_s3_final', base_path='datos/canduela'):
         self.base_path = base_path
-        self.df = pd.read_csv(os.path.join(self.base_path, 'Dataset_Final_S3.csv'), parse_dates=['Fecha'])
-        self.img_dir = os.path.join(self.base_path, 'GEE_Tesis_ImageChips-20260217T075250Z-1-001/GEE_Tesis_ImageChips')
+        self.is_carralancha = 'carralancha' in base_path
+        self.dataset_final_name = 'Dataset_Final_V4.csv' if self.is_carralancha else 'Dataset_Final_S3.csv'
+        self.df = pd.read_csv(os.path.join(self.base_path, self.dataset_final_name), parse_dates=['Fecha'])
+        
+        if self.is_carralancha:
+            self.img_dir = os.path.join(self.base_path, 'satelite')
+            self.area_s3 = 22357.87
+            self.nombre_finca = "Carralancha"
+            self.nombre_sector = "Sector V4"
+            self.nombre_cultivo = "Almendro V4"
+        else:
+            self.img_dir = os.path.join(self.base_path, 'GEE_Tesis_ImageChips-20260217T075250Z-1-001/GEE_Tesis_ImageChips')
+            self.area_s3 = 40650
+            self.nombre_finca = "Canduela"
+            self.nombre_sector = "Sector 3"
+            self.nombre_cultivo = "Almendro Guara"
+            
         self.model_dl_path = model_dl_path
         self.base_model_id = base_model_id
         self.adapter_path = adapter_path
-        self.area_s3 = 40650
         
         # Load DL perception model info
         if os.path.exists(self.model_dl_path):
@@ -634,6 +743,31 @@ class AgroProductionReport:
                 except: continue
 
         if not valid_files:
+            if self.is_carralancha:
+                try:
+                    import matplotlib.pyplot as plt
+                    fig, ax = plt.subplots(figsize=(4, 4))
+                    coords = [
+                        [-4.811755842895575, 41.37409504652195],
+                        [-4.812917239399024, 41.37351537008459],
+                        [-4.811444593553215, 41.37225123589853],
+                        [-4.810167967851344, 41.37273024205082],
+                        [-4.811755842895575, 41.37409504652195]
+                    ]
+                    lons = [c[0] for c in coords]
+                    lats = [c[1] for c in coords]
+                    ax.fill(lons, lats, color='#2ecc71', alpha=0.4, edgecolor='#27ae60', linewidth=2)
+                    ax.plot(lons, lats, 'o', color='#27ae60', markersize=4)
+                    ax.set_title("Ubicacion Sector V4 - Pozaldez", fontsize=9, fontweight='bold', color='#1B5E20')
+                    ax.axis('off')
+                    fig.tight_layout()
+                    out_path = "temp_sat.png"
+                    fig.savefig(out_path, dpi=180)
+                    plt.close(fig)
+                    return out_path
+                except Exception as e:
+                    logger.error(f"Error generando mapa de coordenadas: {e}")
+                    return None
             return None
 
         # Find closest date
@@ -821,7 +955,7 @@ class AgroProductionReport:
                 )
                 prompt = (
                     f"<|begin_of_text|>system\nEres un Orquestador Agrónomo de precisión experto en Riego Deficitario Controlado.<|eot_id|>"
-                    f"user\nAudita la eficiencia del riego e indica prescripción agronómica detallada para el Sector 3 (Almendro).\nContexto: {input_prompt}<|eot_id|>"
+                    f"user\nAudita la eficiencia del riego e indica prescripción agronómica detallada para el {self.sector_name} (Almendro).\nContexto: {input_prompt}<|eot_id|>"
                     f"assistant\n"
                 )
                 inputs = self.tokenizer(prompt, return_tensors="pt").to(device)
@@ -866,8 +1000,8 @@ class AgroProductionReport:
         # Metadata Header
         pdf.set_font("helvetica", "", 8)
         pdf.set_text_color(100)
-        pdf.cell(90, 4, f"ID PARCELA: Sector 3 | Superficie: 4.07 ha ({self.area_s3:,} m2)")
-        pdf.cell(90, 4, f"Fecha Análisis: {date_str} | Cultivo: Almendro Guara", align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(90, 4, f"ID PARCELA: {self.nombre_sector} | Superficie: {self.area_s3/10000:.2f} ha ({self.area_s3:,.1f} m2)")
+        pdf.cell(90, 4, f"Fecha Análisis: {date_str} | Cultivo: {self.nombre_cultivo}", align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(2)
 
         # 1. Executive summary card
@@ -875,7 +1009,7 @@ class AgroProductionReport:
         pdf.set_font("helvetica", "", 9.5)
         pdf.set_text_color(50)
         pdf.multi_cell(0, 5, 
-            "El Sector 3 está clasificado como área de alta prioridad operativa debido a su suelo franco-arenoso, "
+            f"El {self.nombre_sector} de la finca {self.nombre_finca} está clasificado como área de alta prioridad operativa debido a su suelo franco-arenoso, "
             "el cual presenta un drenaje rápido y una baja capacidad de retención de agua. "
             "El monitoreo continuo a nivel foliar (FloraPulse) y radicular es indispensable para coordinar el "
             "Riego Deficitario Controlado (RDC), maximizando la eficiencia de uso del agua en esta fase."
@@ -1071,7 +1205,8 @@ class AgroProductionReport:
         )
 
         if output_pdf_name is None:
-            output_pdf_name = f"Informe_Final_{date_str}.pdf"
+            suffix = "V4" if self.is_carralancha else "S3"
+            output_pdf_name = f"Prescripcion_{suffix}_{date_str}.pdf"
             
         pdf.output(output_pdf_name)
         logger.info(f"Reporte PDF guardado exitosamente como '{output_pdf_name}'")
@@ -1087,18 +1222,38 @@ class AgroProductionReport:
 # ==========================================
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Orquestador de Riego Agro-XAI con FloraPulse")
+    parser.add_argument("--finca", type=str, default="canduela", choices=["canduela", "carralancha"],
+                        help="Finca a procesar: canduela o carralancha.")
     parser.add_argument("--mode", type=str, default="all", choices=["all", "preprocess", "train_dl", "train_llm", "report"],
                         help="Modo de ejecución: preprocess (preprocesar datos), train_dl (entrenar modelo Two-Tower), train_llm (fine-tuning Llama), report (generar PDF) o all (completo).")
-    parser.add_argument("--date", type=str, default="2024-08-10", help="Fecha para el informe PDF (YYYY-MM-DD).")
-    parser.add_argument("--model-dl-path", type=str, default="models/modelo_percepcion_s3.pt", help="Ruta de guardado/lectura del modelo PyTorch.")
+    parser.add_argument("--date", type=str, default=None, help="Fecha para el informe PDF (YYYY-MM-DD).")
+    parser.add_argument("--model-dl-path", type=str, default=None, help="Ruta de guardado/lectura del modelo PyTorch.")
     parser.add_argument("--base-model-id", type=str, default="meta-llama/Llama-3.2-1B-Instruct", help="ID del modelo base de HF.")
-    parser.add_argument("--adapter-path", type=str, default="models/agro_llama_1b_s3_final", help="Ruta de guardado/lectura del adaptador LoRA.")
+    parser.add_argument("--adapter-path", type=str, default=None, help="Ruta de guardado/lectura del adaptador LoRA.")
     parser.add_argument("--skip-llm-train", action="store_true", help="Saltarse la fase de entrenamiento de LLM si ya hay un adaptador guardado.")
     args = parser.parse_args()
 
     # Create directories if they do not exist
     os.makedirs('models', exist_ok=True)
-    base_path = 'datos/canduela'
+    
+    # Configure dynamic paths and defaults depending on finca
+    if args.finca == 'carralancha':
+        base_path = 'datos/carralancha'
+        if args.model_dl_path is None:
+            args.model_dl_path = 'models/modelo_percepcion_v4.pt'
+        if args.adapter_path is None:
+            args.adapter_path = 'models/agro_llama_1b_v4_final'
+        if args.date is None:
+            args.date = '2025-07-20'
+    else:
+        base_path = 'datos/canduela'
+        if args.model_dl_path is None:
+            args.model_dl_path = 'models/modelo_percepcion_s3.pt'
+        if args.adapter_path is None:
+            args.adapter_path = 'models/agro_llama_1b_s3_final'
+        if args.date is None:
+            args.date = '2024-08-10'
+            
     os.makedirs(base_path, exist_ok=True)
     os.makedirs('datos/carralancha', exist_ok=True)
 
@@ -1117,8 +1272,11 @@ if __name__ == "__main__":
     # Two-Tower training
     if args.mode in ["all", "train_dl"]:
         img_dir = os.path.join(base_path, 'GEE_Tesis_ImageChips-20260217T075250Z-1-001/GEE_Tesis_ImageChips')
-        trainer = AgroModelTrainer(img_dir=img_dir, cols_tab=cols_tab, model_save_path=args.model_dl_path)
-        trainer.train_model(df_master)
+        if not os.path.exists(img_dir):
+            logger.warning(f"Directorio de chips de satelite {img_dir} no existe. Saltando entrenamiento Two-Tower.")
+        else:
+            trainer = AgroModelTrainer(img_dir=img_dir, cols_tab=cols_tab, model_save_path=args.model_dl_path)
+            trainer.train_model(df_master)
 
     # LLM Dataset generation & training
     if args.mode in ["all", "train_llm"] or (args.mode == "all" and not args.skip_llm_train):
