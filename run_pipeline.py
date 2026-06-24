@@ -38,8 +38,10 @@ logger.info(f"Using device: {device}")
 # 1. DATA MANAGER (INGESTION & CLEANING)
 # ==========================================
 class AgroDataManager:
-    def __init__(self, base_path='datos/canduela'):
+    def __init__(self, base_path='datos/canduela', sector=3, days=3):
         self.base_path = base_path
+        self.sector = sector
+        self.days = days
         if 'carralancha' in base_path:
             self.area_s3 = 22357.87  # m2 for Sector V4
             self.archivo_aemet = 'AEMET_Rueda_historico.csv'
@@ -50,9 +52,13 @@ class AgroDataManager:
                 'Sat_LST': 'satelite/MODIS_Temp_Parcela_Real.csv'
             }
         else:
-            self.area_s3 = 40650  # m2 for Sector S3
+            if sector == 2:
+                self.area_s3 = 16698.54  # m2 for Sector 2
+                self.archivo_riegos = 'CANDUELA - 080221084930-077_ (1).xlsx'
+            else:
+                self.area_s3 = 40650  # m2 for Sector S3
+                self.archivo_riegos = 'RIEGOS_1.csv'
             self.archivos_sensores = ['DATOSE_1.csv', 'DATOSE_2.csv', 'DATOSE_3.csv']
-            self.archivo_riegos = 'RIEGOS_1.csv'
             self.archivo_aemet = 'AEMET_Sardon_historico.csv'
             self.archivos_sat = {
                 'Sat_NDVI': 'satelite/Sentinel2_NDVI_Parcela_Real.csv',
@@ -143,20 +149,31 @@ class AgroDataManager:
             logger.info(f"Dataset consolidado final Carralancha V4 guardado en {final_path}. Filas: {len(df_master)}")
             return df_master
 
-        logger.info("Fase 1: Cargando y consolidando datos (Sensores, AEMET, Riegos, Satélites, FloraPulse)...")
+        logger.info("Fase 1: Cargando y consolidando datos (Cesens Excels, AEMET, Riegos, Satélites, FloraPulse)...")
 
-        # 1. Sensors Data
-        list_s = []
-        for f in self.archivos_sensores:
-            path = os.path.join(self.base_path, f)
-            if os.path.exists(path):
-                df_s = pd.read_csv(path)
-                df_s['Fecha'] = pd.to_datetime(df_s['Fecha'], errors='coerce')
-                list_s.append(df_s.dropna(subset=['Fecha']))
-        if not list_s:
-            raise FileNotFoundError("No se encontraron archivos de sensores locales (DATOSE_*.csv).")
+        # 1. Sensors Data (Cesens Excel files)
+        excel_files = glob.glob(os.path.join(self.base_path, "Datos estaciones Cesens *.xlsx"))
+        if not excel_files:
+            raise FileNotFoundError("No se encontraron archivos de Cesens (Datos estaciones Cesens *.xlsx).")
         
-        df_sensor = pd.concat(list_s)
+        list_s = []
+        for f in sorted(excel_files):
+            try:
+                xl = pd.ExcelFile(f)
+                sheet = xl.sheet_names[0]
+                df_s = xl.parse(sheet)
+                df_s['Fecha'] = pd.to_datetime(df_s['Fecha'], errors='coerce')
+                df_s = df_s.dropna(subset=['Fecha'])
+                # Select only relevant columns to save memory
+                df_s = df_s[['Fecha', 'Temperatura', 'Radiación solar', 'Precipitaciones']]
+                list_s.append(df_s)
+            except Exception as e:
+                logger.error(f"Error cargando Cesens excel {f}: {e}")
+        
+        if not list_s:
+            raise FileNotFoundError("No se pudieron cargar datos de los excels de Cesens.")
+            
+        df_sensor = pd.concat(list_s, ignore_index=True)
         df_clima = df_sensor.set_index('Fecha').resample('D').agg({
             'Temperatura': 'mean',
             'Radiación solar': 'mean',
@@ -171,29 +188,55 @@ class AgroDataManager:
         if os.path.exists(path_aemet):
             df_aemet = pd.read_csv(path_aemet, parse_dates=['Fecha'])
             df_aemet = df_aemet.sort_values('Fecha')
-            # 3-day accumulated rolling rain forecast
+            # 3-day and 5-day accumulated rolling rain forecast
             df_aemet['Lluvia_Prevista_3d'] = df_aemet['Lluvia_AEMET'].shift(-1).rolling(3, min_periods=1).sum().shift(-2).fillna(0)
+            df_aemet['Lluvia_Prevista_5d'] = df_aemet['Lluvia_AEMET'].shift(-1).rolling(5, min_periods=1).sum().shift(-4).fillna(0)
         else:
             raise FileNotFoundError(f"No se encontró archivo de AEMET: {path_aemet}")
 
         # 3. Irrigation logs
-        path_riegos = os.path.join(self.base_path, self.archivo_riegos)
-        if os.path.exists(path_riegos):
-            df_r = pd.read_csv(path_riegos)
-            df_r['Sectores de Riego'] = pd.to_numeric(df_r['Sectores de Riego'], errors='coerce')
-            df_r['Agua m3'] = df_r['Agua m³'].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
-            df_r['Agua m3'] = pd.to_numeric(df_r['Agua m3'], errors='coerce')
-            df_r['Fecha'] = pd.to_datetime(df_r['Inicio'].astype(str).str[:10], dayfirst=True, errors='coerce')
-            # Sector 3 specific irrigation
-            df_s3 = df_r[df_r['Sectores de Riego'] == 3].groupby('Fecha')['Agua m3'].sum().reset_index()
-            df_s3['Riego_mm_Real'] = (df_s3['Agua m3'] * 1000) / self.area_s3
+        if self.sector == 2:
+            excel_path = os.path.join(self.base_path, self.archivo_riegos)
+            if os.path.exists(excel_path):
+                df_xl = pd.read_excel(excel_path)
+                df_xl['event_id'] = df_xl['Equipo'].notna().cumsum()
+                comienzo_col = df_xl.columns[4]
+                consumo_real_col = df_xl.columns[10]
+                valvulas_col = df_xl.columns[27]
+
+                header_cols = [df_xl.columns[i] for i in [0, 2, 4, 5, 6, 9, 10]]
+                for col in header_cols:
+                    df_xl[col] = df_xl[col].ffill()
+
+                df_v2 = df_xl[df_xl[valvulas_col] == 'V2'].copy()
+                df_v2['Fecha'] = pd.to_datetime(df_v2[comienzo_col], dayfirst=True, errors='coerce').dt.normalize()
+                df_v2_events = df_v2.drop_duplicates(subset=['event_id']).copy()
+                df_s2_grouped = df_v2_events.groupby('Fecha')[consumo_real_col].sum().reset_index()
+                df_s2_grouped = df_s2_grouped.rename(columns={consumo_real_col: 'Riego_m3_Real'})
+                df_s2_grouped['Riego_mm_Real'] = (df_s2_grouped['Riego_m3_Real'] * 1000) / self.area_s3
+                df_riego = df_s2_grouped[['Fecha', 'Riego_mm_Real']]
+            else:
+                logger.warning(f"Archivo Excel de riegos no encontrado en {excel_path}. Asumiendo riego real 0.")
+                df_riego = pd.DataFrame(columns=['Fecha', 'Riego_mm_Real'])
         else:
-            logger.warning(f"Archivo de riegos no encontrado en {path_riegos}. Asumiendo riego real 0.")
-            df_s3 = pd.DataFrame(columns=['Fecha', 'Riego_mm_Real'])
+            path_riegos = os.path.join(self.base_path, self.archivo_riegos)
+            if os.path.exists(path_riegos):
+                df_r = pd.read_csv(path_riegos)
+                df_r['Sectores de Riego'] = pd.to_numeric(df_r['Sectores de Riego'], errors='coerce')
+                df_r['Agua m3'] = df_r['Agua m³'].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
+                df_r['Agua m3'] = pd.to_numeric(df_r['Agua m3'], errors='coerce')
+                df_r['Fecha'] = pd.to_datetime(df_r['Inicio'].astype(str).str[:10], dayfirst=True, errors='coerce')
+                # Sector 3 specific irrigation
+                df_s3 = df_r[df_r['Sectores de Riego'] == 3].groupby('Fecha')['Agua m3'].sum().reset_index()
+                df_s3['Riego_mm_Real'] = (df_s3['Agua m3'] * 1000) / self.area_s3
+                df_riego = df_s3[['Fecha', 'Riego_mm_Real']]
+            else:
+                logger.warning(f"Archivo de riegos no encontrado en {path_riegos}. Asumiendo riego real 0.")
+                df_riego = pd.DataFrame(columns=['Fecha', 'Riego_mm_Real'])
 
         # 4. Merge base climate, AEMET, Riegos
-        df_master = pd.merge(df_clima, df_aemet[['Fecha', 'Lluvia_Prevista_3d', 'Lluvia_AEMET']], on='Fecha', how='outer')
-        df_master = pd.merge(df_master, df_s3[['Fecha', 'Riego_mm_Real']], on='Fecha', how='left').fillna({'Riego_mm_Real': 0})
+        df_master = pd.merge(df_clima, df_aemet[['Fecha', 'Lluvia_Prevista_3d', 'Lluvia_Prevista_5d', 'Lluvia_AEMET']], on='Fecha', how='outer')
+        df_master = pd.merge(df_master, df_riego[['Fecha', 'Riego_mm_Real']], on='Fecha', how='left').fillna({'Riego_mm_Real': 0})
         df_master = df_master.sort_values('Fecha').reset_index(drop=True)
 
         # 5. Satellite Data Ingest
@@ -201,6 +244,7 @@ class AgroDataManager:
             path_sat = os.path.join(self.base_path, rel_path)
             if os.path.exists(path_sat):
                 df_sat = pd.read_csv(path_sat, parse_dates=['Fecha']).rename(columns={'Valor': col})
+                df_sat = df_sat.groupby('Fecha')[col].mean().reset_index()
                 df_master = pd.merge(df_master, df_sat[['Fecha', col]], on='Fecha', how='left')
                 df_master[col] = pd.to_numeric(df_master[col], errors='coerce')
                 # Interpolate satellite data linearly
@@ -211,7 +255,8 @@ class AgroDataManager:
 
         # Kc Dinámico and Crop Evapotranspiration (ETc)
         df_master['Kc_Dinamico'] = 0.4 + (df_master['Sat_NDVI'] * 0.8)
-        df_master['ETc_Sector3'] = df_master['ET0_Calculada'] * df_master['Kc_Dinamico']
+        etc_col = 'ETc_Sector2' if (not 'carralancha' in self.base_path and self.sector == 2) else 'ETc_Sector3'
+        df_master[etc_col] = df_master['ET0_Calculada'] * df_master['Kc_Dinamico']
 
         # 6. FloraPulse Data Ingestion
         excel_files = glob.glob(os.path.join(self.base_path, 'florapulse', "*.xlsx"))
@@ -281,8 +326,11 @@ class AgroDataManager:
         df_master['Temperatura'] = df_master['Temperatura'].interpolate(method='linear', limit_direction='both')
         df_master['Radiación solar'] = df_master['Radiación solar'].interpolate(method='linear', limit_direction='both')
         df_master['Precipitaciones'] = df_master['Precipitaciones'].fillna(0)
+        df_master['Lluvia_AEMET'] = df_master['Lluvia_AEMET'].fillna(0)
+        df_master['Lluvia_Prevista_3d'] = df_master['Lluvia_Prevista_3d'].fillna(0)
+        df_master['Lluvia_Prevista_5d'] = df_master['Lluvia_Prevista_5d'].fillna(0)
         df_master['ET0_Calculada'] = df_master['ET0_Calculada'].interpolate(method='linear', limit_direction='both')
-        df_master['ETc_Sector3'] = df_master['ETc_Sector3'].interpolate(method='linear', limit_direction='both')
+        df_master[etc_col] = df_master[etc_col].interpolate(method='linear', limit_direction='both')
 
         # Crop NDVI, LST, and Radar
         df_master['Sat_NDVI'] = df_master['Sat_NDVI'].interpolate(method='linear', limit_direction='both')
@@ -292,7 +340,11 @@ class AgroDataManager:
         # Drop any remaining NaNs in columns essential for Two-Tower training
         df_master = df_master.dropna(subset=['Sat_NDVI', 'Sat_Radar', 'Sat_LST', 'FP_Potencial_Min']).reset_index(drop=True)
 
-        final_path = os.path.join(self.base_path, 'Dataset_Final_S3.csv')
+        if 'carralancha' in self.base_path:
+            final_filename = 'Dataset_Final_V4.csv'
+        else:
+            final_filename = f'Dataset_Final_S{self.sector}.csv'
+        final_path = os.path.join(self.base_path, final_filename)
         df_master.to_csv(final_path, index=False)
         logger.info(f"Dataset consolidado final guardado en {final_path}. Filas: {len(df_master)}")
         return df_master
@@ -456,13 +508,19 @@ class AgroModelTrainer:
 # 3. LLM FINE-TUNING (QLORA COT PRESCRIPTOR)
 # ==========================================
 class AgroLLMOptimizer:
-    def __init__(self, base_model_id="meta-llama/Llama-3.2-1B-Instruct", save_adapter_path="models/agro_llama_1b_s3_final", base_path="datos/canduela"):
+    def __init__(self, base_model_id="meta-llama/Llama-3.2-1B-Instruct", save_adapter_path="models/agro_llama_1b_s3_final", base_path="datos/canduela", sector=3, days=3):
         self.base_model_id = base_model_id
         self.save_adapter_path = save_adapter_path
         self.base_path = base_path
         self.is_carralancha = 'carralancha' in base_path
-        self.sector_name = "Sector V4" if self.is_carralancha else "Sector 3"
-        self.dataset_cot_name = 'dataset_cot_v4.jsonl' if self.is_carralancha else 'dataset_cot_s3.jsonl'
+        self.sector = sector
+        self.days = days
+        if self.is_carralancha:
+            self.sector_name = "Sector V4"
+            self.dataset_cot_name = 'dataset_cot_v4.jsonl'
+        else:
+            self.sector_name = f"Sector {self.sector}"
+            self.dataset_cot_name = f'dataset_cot_s{self.sector}.jsonl'
 
     @staticmethod
     def _classify_stress(pot):
@@ -480,10 +538,12 @@ class AgroLLMOptimizer:
         logger.info("Generando dataset para Fine-Tuning de orquestación CoT con FloraPulse...")
         dataset_llm = []
         
+        etc_col = 'ETc_Sector2' if (not self.is_carralancha and self.sector == 2) else 'ETc_Sector3'
+        lluvia_p_col = f'Lluvia_Prevista_{self.days}d'
         for _, row in df.iterrows():
             kc = row['Kc_Dinamico']
-            etc = row['ETc_Sector3']
-            lluvia_p = row['Lluvia_Prevista_3d']
+            etc = row[etc_col]
+            lluvia_p = row[lluvia_p_col]
             riego_h = row['Riego_mm_Real']
             pot = row['FP_Potencial_Min']
             sm10 = row['FP_Humedad_10cm']
@@ -491,7 +551,7 @@ class AgroLLMOptimizer:
             stress = self._classify_stress(pot)
             
             # Agronomic regulation logic for Dose Calculation
-            dosis_ideal_base = etc * 3 - lluvia_p  # Next 3 days target
+            dosis_ideal_base = etc * self.days - lluvia_p  # Next days target
             if pot >= -8.0:
                 deficit_coef = 0.70  # Standard regulated deficit
                 dosis_rec = max(0, dosis_ideal_base * deficit_coef)
@@ -510,20 +570,20 @@ class AgroLLMOptimizer:
                 prescripcion = "ALERTA CRÍTICA: Potencial hídrico en zona de peligro. Aplicar riego de choque de forma inmediata para restaurar turgencia celular."
 
             # Calculate variance
-            varianza = riego_h - (dosis_rec / 3.0)
+            varianza = riego_h - (dosis_rec / self.days)
 
             output_text = (
                 f"ANÁLISIS AGRO-XAI: Kc Dinámico {kc:.2f}, Demanda ETc {etc:.1f} mm/día. "
                 f"MONITORIZACIÓN BIOFÍSICA (FLORAPULSE): Potencial hídrico foliar de {pot:.1f} bar (Estrés: {stress}). "
                 f"Humedad del suelo a 10cm: {sm10:.1f}%, a 40cm: {sm40:.1f}%. "
-                f"AUDITORÍA: Aplicados {riego_h:.1f} mm en últimas 24h. Con previsión de lluvia de {lluvia_p:.1f} mm en 3 días, "
-                f"la dosis ideal prescrita para los próximos 3 días es {dosis_rec:.1f} mm ({dosis_rec/3.0:.1f} mm/día). "
+                f"AUDITORÍA: Aplicados {riego_h:.1f} mm en últimas 24h. Con previsión de lluvia de {lluvia_p:.1f} mm en {self.days} días, "
+                f"la dosis ideal prescrita para los próximos {self.days} días es {dosis_rec:.1f} mm ({dosis_rec/self.days:.1f} mm/día). "
                 f"VARIANZA: {varianza:+.1f} mm. "
                 f"PRESCRIPCIÓN: {prescripcion}"
             )
             
             input_text = (
-                f"NDVI: {row['Sat_NDVI']:.2f}, ET0: {row['ET0_Calculada']:.1f} mm, Lluvia_Prevista_3d: {lluvia_p:.1f} mm, "
+                f"NDVI: {row['Sat_NDVI']:.2f}, ET0: {row['ET0_Calculada']:.1f} mm, {lluvia_p_col}: {lluvia_p:.1f} mm, "
                 f"Potencial_Almendra: {pot:.1f} bar, Humedad_10cm: {sm10:.1f}%, Riego_Histórico: {riego_h:.1f} mm"
             )
             
@@ -618,6 +678,10 @@ C_TEXT = (33, 33, 33)
 C_BG_CARD = (245, 247, 245)
 
 class AgroPDF(FPDF):
+    def __init__(self, nombre_sector="Sector 3"):
+        super().__init__()
+        self.nombre_sector = nombre_sector
+
     def header(self):
         # Forest green background banner
         self.set_fill_color(27, 94, 32)
@@ -627,7 +691,7 @@ class AgroPDF(FPDF):
         self.set_text_color(255)
         self.cell(0, 8, "INFORME OPERATIVO DE PRECISION - ORQUESTADOR AGRO-XAI", align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         self.set_font("helvetica", "I", 9)
-        self.cell(0, 4, "Monitoreo Integrado de Vigor Satelital, Clima y Fisiología Foliar (Sector 3)", align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        self.cell(0, 4, f"Monitoreo Integrado de Vigor Satelital, Clima y Humedad del Suelo ({self.nombre_sector})", align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         self.ln(6)
 
     def footer(self):
@@ -650,10 +714,15 @@ class AgroPDF(FPDF):
 
 
 class AgroProductionReport:
-    def __init__(self, model_dl_path='models/modelo_percepcion_s3.pt', base_model_id='meta-llama/Llama-3.2-1B-Instruct', adapter_path='models/agro_llama_1b_s3_final', base_path='datos/canduela'):
+    def __init__(self, model_dl_path='models/modelo_percepcion_s3.pt', base_model_id='meta-llama/Llama-3.2-1B-Instruct', adapter_path='models/agro_llama_1b_s3_final', base_path='datos/canduela', sector=3, days=3):
         self.base_path = base_path
+        self.sector = sector
+        self.days = days
         self.is_carralancha = 'carralancha' in base_path
-        self.dataset_final_name = 'Dataset_Final_V4.csv' if self.is_carralancha else 'Dataset_Final_S3.csv'
+        if self.is_carralancha:
+            self.dataset_final_name = 'Dataset_Final_V4.csv'
+        else:
+            self.dataset_final_name = f'Dataset_Final_S{self.sector}.csv'
         self.df = pd.read_csv(os.path.join(self.base_path, self.dataset_final_name), parse_dates=['Fecha'])
         
         if self.is_carralancha:
@@ -662,12 +731,21 @@ class AgroProductionReport:
             self.nombre_finca = "Carralancha"
             self.nombre_sector = "Sector V4"
             self.nombre_cultivo = "Almendro V4"
+            self.precipitation_rate = 1.2
         else:
             self.img_dir = os.path.join(self.base_path, 'GEE_Tesis_ImageChips-20260217T075250Z-1-001/GEE_Tesis_ImageChips')
-            self.area_s3 = 40650
-            self.nombre_finca = "Canduela"
-            self.nombre_sector = "Sector 3"
-            self.nombre_cultivo = "Almendro Guara"
+            if self.sector == 2:
+                self.area_s3 = 16698.54
+                self.nombre_finca = "Canduela"
+                self.nombre_sector = "Sector 2"
+                self.nombre_cultivo = "Almendro"
+                self.precipitation_rate = 1.09
+            else:
+                self.area_s3 = 40650
+                self.nombre_finca = "Canduela"
+                self.nombre_sector = "Sector 3"
+                self.nombre_cultivo = "Almendro Guara"
+                self.precipitation_rate = 1.2
             
         self.model_dl_path = model_dl_path
         self.base_model_id = base_model_id
@@ -720,7 +798,6 @@ class AgroProductionReport:
         if ndvi >= 0.65: return "Alto Vigor (Desarrollo óptimo)"
         if ndvi >= 0.45: return "Vigor Medio (Seguimiento activo)"
         return "Bajo Vigor (Alerta de estrés vegetativo)"
-
     @staticmethod
     def _classify_stress(pot):
         if pot >= -8.0: return "Nulo (Suelo hidratado)"
@@ -729,6 +806,135 @@ class AgroProductionReport:
         else: return "Severo (Riesgo de defoliación)"
 
     def _prepare_img(self, date):
+        if not self.is_carralancha and self.sector == 2:
+            try:
+                import matplotlib.pyplot as plt
+                from rasterio.warp import transform
+                
+                # Coordenadas del Sector 2
+                coords = [
+                    [-4.577624452593563, 41.814040723556154],
+                    [-4.577847075941799, 41.813829819817485],
+                    [-4.578032148363826, 41.813547947385764],
+                    [-4.578068697003681, 41.81318036452114],
+                    [-4.578187960151398, 41.81304849397068],
+                    [-4.5787659761941075, 41.81318443366328],
+                    [-4.5789922247252175, 41.8128168929197],
+                    [-4.57900161245677, 41.812716936717905],
+                    [-4.578906394036741, 41.81257571549979],
+                    [-4.579008317979307, 41.81245576758731],
+                    [-4.579288608821363, 41.81226179164462],
+                    [-4.579359687360258, 41.81213584571337],
+                    [-4.579383827241392, 41.81202789186088],
+                    [-4.579473681243391, 41.811804986571325],
+                    [-4.579570240767927, 41.81157808218388],
+                    [-4.579650509117174, 41.81137531452619],
+                    [-4.579696106670427, 41.811228375548794],
+                    [-4.579764503000307, 41.810963484704025],
+                    [-4.579886543510485, 41.81064661383948],
+                    [-4.580094414709139, 41.81020878968733],
+                    [-4.580137330053377, 41.810058849221306],
+                    [-4.580166834352541, 41.80985093119436],
+                    [-4.579960304258394, 41.80978995510655],
+                    [-4.579854357002306, 41.80994689344449],
+                    [-4.579501646516848, 41.80984693276414],
+                    [-4.57937424158864, 41.81008084051163],
+                    [-4.5798677680473805, 41.81022478331631],
+                    [-4.579641121385622, 41.81058863729716],
+                    [-4.579350874669361, 41.811062291391984],
+                    [-4.578583863489332, 41.81230090431014],
+                    [-4.5780997247621436, 41.813084561839695],
+                    [-4.577533597319558, 41.813997981766136],
+                    [-4.577624452593563, 41.814040723556154]
+                ]
+                lons = [c[0] for c in coords]
+                lats = [c[1] for c in coords]
+                
+                # Buscar imagen más cercana
+                files = [f for f in os.listdir(self.img_dir) if f.endswith(".tif")]
+                img_dates = []
+                valid_files = []
+                for f in files:
+                    m = re.search(r'(\d{4})-\d{2}-(\d{1,3})', f)
+                    if m:
+                        try:
+                            fecha = datetime.strptime(f"{m.group(1)}-{m.group(2)}", "%Y-%j")
+                            img_dates.append(pd.Timestamp(fecha))
+                            valid_files.append(f)
+                        except: continue
+                
+                if not valid_files:
+                    logger.warning("No se encontraron imágenes satelitales en TIF. Usando mapa básico.")
+                    return None
+                
+                dist = np.abs(pd.to_datetime(img_dates) - date)
+                closest_img_name = valid_files[np.argmin(dist)]
+                
+                with rasterio.open(os.path.join(self.img_dir, closest_img_name)) as src:
+                    # Leer RGB
+                    rgb = src.read([3, 2, 1]).astype(np.float32)
+                    rgb = np.moveaxis(rgb, 0, -1)
+                    p2, p98 = np.nanpercentile(rgb, (2, 98))
+                    rgb = np.clip((rgb - p2) / (p98 - p2 + 1e-10), 0, 1)
+                    rgb = np.nan_to_num(rgb)
+                    
+                    # Leer B4 y B8 para NDVI
+                    b4 = src.read(3).astype(np.float32)
+                    b8 = src.read(7).astype(np.float32)
+                    ndvi = (b8 - b4) / (b8 + b4 + 1e-10)
+                    
+                    left, bottom, right, top = src.bounds
+                    width, height = src.width, src.height
+                    
+                    # Proyectar y desplazar coordenadas de Sector 2 para alinearlas
+                    xs, ys = transform('EPSG:4326', 'EPSG:32630', lons, lats)
+                    tif_cx = (left + right) / 2.0
+                    tif_cy = (bottom + top) / 2.0
+                    s2_cx = (min(xs) + max(xs)) / 2.0
+                    s2_cy = (min(ys) + max(ys)) / 2.0
+                    
+                    dx = tif_cx - s2_cx
+                    dy = tif_cy - s2_cy
+                    
+                    xs_shifted = [x + dx for x in xs]
+                    ys_shifted = [y + dy for y in ys]
+                    
+                    pixel_w = (right - left) / width
+                    pixel_h = (top - bottom) / height
+                    
+                    cols_pixel = [(x - left) / pixel_w for x in xs_shifted]
+                    rows_pixel = [(top - y) / pixel_h for y in ys_shifted]
+                    
+                    # Graficar
+                    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 4))
+                    
+                    # Imagen RGB Real
+                    ax1.imshow(rgb, extent=[0, width, height, 0])
+                    ax1.plot(cols_pixel, rows_pixel, color='cyan', linewidth=2)
+                    ax1.fill(cols_pixel, rows_pixel, color='cyan', alpha=0.15)
+                    ax1.set_title("Imagen Satelital Real", fontsize=10, fontweight='bold', color='#1B5E20')
+                    ax1.axis('off')
+                    
+                    # Radiografía de Salud NDVI (RdYlBu)
+                    im = ax2.imshow(ndvi, cmap='RdYlBu', vmin=0.1, vmax=0.6, extent=[0, width, height, 0])
+                    ax2.plot(cols_pixel, rows_pixel, color='black', linewidth=1.5)
+                    ax2.fill(cols_pixel, rows_pixel, color='blue', alpha=0.1)
+                    ax2.set_title("Radiografía de Salud (NDVI)", fontsize=10, fontweight='bold', color='#1B5E20')
+                    ax2.axis('off')
+                    
+                    cbar = fig.colorbar(im, ax=ax2, fraction=0.046, pad=0.04)
+                    cbar.ax.tick_params(labelsize=8)
+                    cbar.set_label('Vigor (NDVI)', fontsize=8)
+                    
+                    plt.tight_layout()
+                    out_path = "temp_sat.png"
+                    fig.savefig(out_path, dpi=180)
+                    plt.close(fig)
+                    return out_path
+            except Exception as e:
+                logger.error(f"Error generando mapa de coordenadas en TIF: {e}")
+                return None
+
         # Look for images matching the year
         files = [f for f in os.listdir(self.img_dir) if f.endswith(".tif")]
         img_dates = []
@@ -820,7 +1026,7 @@ class AgroProductionReport:
         fig.savefig(plot_balance_path, dpi=180)
         plt.close(fig)
 
-        # 2. Line Plot: Dual axis evolution (NDVI vs Water Potential)
+        # 2. Line Plot: Dual axis evolution (NDVI vs Soil Moisture)
         fig, ax1 = plt.subplots(figsize=(6.5, 3.0))
         color = '#27ae60'
         ax1.set_xlabel('Últimos 30 días', fontsize=8, fontweight='bold')
@@ -831,57 +1037,44 @@ class AgroProductionReport:
         # Dual axis
         ax2 = ax1.twinx()
         color = '#2980b9'
-        ax2.set_ylabel('Potencial Hídrico (bar)', color=color, fontsize=8, fontweight='bold')
-        line2 = ax2.plot(history_df['Fecha'], history_df['FP_Potencial_Min'], color=color, linewidth=2, linestyle='--', label='Potencial Hídrico', marker='s', markersize=3)
+        ax2.set_ylabel('Humedad Suelo 40cm (%)', color=color, fontsize=8, fontweight='bold')
+        line2 = ax2.plot(history_df['Fecha'], history_df['FP_Humedad_40cm'], color=color, linewidth=2, linestyle='--', label='Humedad (40cm)', marker='s', markersize=3)
         ax2.tick_params(axis='y', labelcolor=color, labelsize=7)
         
         lines = line1 + line2
         labels = [l.get_label() for l in lines]
         ax1.legend(lines, labels, loc='upper left', fontsize=7, framealpha=0.8)
-        ax1.set_title("Evolución de Vigor (NDVI) y Estrés (FloraPulse)", fontsize=10, fontweight='bold', color='#1B5E20', pad=8)
+        ax1.set_title("Evolución de Vigor (NDVI) y Humedad del Suelo (40cm)", fontsize=10, fontweight='bold', color='#1B5E20', pad=8)
         ax1.grid(True, alpha=0.15)
         fig.autofmt_xdate(rotation=15, ha='right')
         fig.tight_layout()
         plot_evol_path = "temp_plot_evol.png"
-        fig.savefig(plot_evol_path, dpi=180)
+        fig.savefig(plot_evol_path)
         plt.close(fig)
 
         return plot_balance_path, plot_evol_path
 
-    def _generate_rule_based_presc(self, row):
+    def _generate_rule_based_presc(self, row, etc_val):
         kc = row['Kc_Dinamico']
-        etc = row['ETc_Sector3']
-        lluvia_p = row['Lluvia_Prevista_3d']
-        riego_h = row['Riego_mm_Real']
-        pot = row['FP_Potencial_Min']
+        etc_col = 'ETc_Sector2' if (not self.is_carralancha and self.sector == 2) else 'ETc_Sector3'
+        etc = etc_val
+        lluvia_p_col = f'Lluvia_Prevista_{self.days}d'
+        lluvia_p = row[lluvia_p_col]
         sm10 = row['FP_Humedad_10cm']
         sm40 = row['FP_Humedad_40cm']
-        stress = self._classify_stress(pot)
         
-        dosis_ideal_base = etc * 3 - lluvia_p
-        if pot >= -8.0:
-            dosis_rec = max(0, dosis_ideal_base * 0.70)
-            presc = "Suelo húmedo y potencial óptimo. Se prescribe riego de mantenimiento para mantener el nivel actual de vigor."
-        elif -12.0 <= pot < -8.0:
-            dosis_rec = max(0, dosis_ideal_base * 0.60)
-            presc = "Estrés leve favorable para el cultivo en esta etapa. Mantener estrategia de RDI con dosis controlada."
-        elif -16.0 <= pot < -12.0:
-            dosis_rec = max(0, dosis_ideal_base * 0.85 + 3.0)
-            presc = "Se detecta estrés moderado en FloraPulse. Incrementar dosis de riego para recuperar el potencial hídrico foliar."
-        else:
-            dosis_rec = max(0, dosis_ideal_base * 1.00 + 8.0)
-            presc = "ALERTA CRÍTICA: Potencial hídrico en zona de peligro. Aplicar riego de choque de forma inmediata para restaurar turgencia celular."
-
-        varianza = riego_h - (dosis_rec / 3.0)
+        dosis_ideal_base = etc * self.days - lluvia_p
+        
+        # Estrategia de Riego Deficitario Controlado (RDC) para Almendro en post-cuajado / crecimiento vegetativo (finales de junio):
+        # Aportar el 70% de la ETc para mantener el vigor sin provocar excesivo crecimiento vegetativo ni desperdicio de agua.
+        dosis_rec = max(0, dosis_ideal_base * 0.70)
+        presc = "Estrategia de Riego Deficitario Controlado (RDC) al 70%. Se prescribe riego de mantenimiento para sostener el vigor y el desarrollo del fruto."
         
         advice = (
-            f"- ANALISIS DE DEMANDA: Coeficiente Kc de {kc:.2f} con una demanda hidrica diaria ETc de {etc:.1f} mm/dia.\n"
-            f"- FISIOLOGIA FOLIAR (FloraPulse): Potencial hídrico foliar en tallo de {pot:.1f} bar (Umbral de estrés: {stress}).\n"
-            f"- PERFIL DE HUMEDAD DE SUELO: Humedad radicular del {sm10:.1f}% a 10cm y del {sm40:.1f}% a 40cm de profundidad.\n"
-            f"- AUDITORIA DE EFICIENCIA: Aplicados {riego_h:.1f} mm en últimas 24h. Con previsión de lluvia de {lluvia_p:.1f} mm en 3 días,\n"
-            f"  la dosis ideal recomendada para los próximos 3 días es de {dosis_rec:.1f} mm ({dosis_rec/3.0:.1f} mm/dia).\n"
-            f"- DESVIACION OPERATIVA (Riego vs Prescrito): {varianza:+.1f} mm.\n"
-            f"- RECOMENDACION / PRESCRIPCION: {presc}"
+            f"- <b><u>ANÁLISIS DE DEMANDA:</u></b> Coeficiente Kc de <b>{kc:.2f}</b> con una demanda hídrica diaria ETc de <b>{etc:.1f} mm/día</b>.<br/>"
+            f"- <b><u>PERFIL DE HUMEDAD DE SUELO:</u></b> Humedad radicular del <b>{sm10:.1f}%</b> a 10cm y del <b>{sm40:.1f}%</b> a 40cm de profundidad.<br/>"
+            f"- <b><u>PLAN DE RIEGO RECOMENDADO:</u></b> Con una previsión de lluvia de <b>{lluvia_p:.1f} mm</b> en los próximos {self.days} días, la dosis recomendada es de <b>{dosis_rec:.1f} mm</b> (<b>{dosis_rec/self.days:.1f} mm/día</b>), lo que equivale a un volumen total de <b>{(dosis_rec*self.area_s3/1000.0):.1f} m³</b>.<br/>"
+            f"- <b><u>ESTRATEGIA APLICADA:</u></b> {presc}"
         )
         return advice, dosis_rec
 
@@ -939,8 +1132,29 @@ class AgroProductionReport:
         else:
             pred_ndvi_val = float(row['Sat_NDVI'] * 0.98 + np.random.normal(0, 0.01))
 
-        # Evapotranspiración balance
-        balance = float(row['ET0_Calculada'] - row['Lluvia_Prevista_3d'])
+        # Determine etc_col
+        etc_col = 'ETc_Sector2' if (not self.is_carralancha and self.sector == 2) else 'ETc_Sector3'
+        
+        # Calcular ETc representativo (usando media móvil de 3 días si el último día está incompleto)
+        fecha_reporte = row['Fecha']
+        df_temp = self.df[self.df['Fecha'] <= fecha_reporte].copy()
+        
+        es_hoy = (fecha_reporte.date() == datetime.today().date())
+        mes = fecha_reporte.month
+        es_epoca_riego = 4 <= mes <= 10
+        es_incompleto = (es_hoy and datetime.now().hour < 22) or (es_epoca_riego and row['ET0_Calculada'] < 1.5)
+        
+        if es_incompleto and len(df_temp) > 1:
+            etc_rep = df_temp.iloc[:-1][etc_col].tail(3).mean()
+            if pd.isna(etc_rep):
+                etc_rep = row[etc_col]
+        else:
+            etc_rep = df_temp[etc_col].tail(3).mean()
+            if pd.isna(etc_rep):
+                etc_rep = row[etc_col]
+
+        lluvia_p_col = f'Lluvia_Prevista_{self.days}d'
+        balance = float(row['ET0_Calculada'] - row[lluvia_p_col])
         estado_vigor = self._crop_status(float(row['Sat_NDVI']))
         stress_desc = self._classify_stress(float(row['FP_Potencial_Min']))
         
@@ -950,12 +1164,12 @@ class AgroProductionReport:
         if self.llm is not None:
             try:
                 input_prompt = (
-                    f"NDVI: {row['Sat_NDVI']:.2f}, ET0: {row['ET0_Calculada']:.1f} mm, Lluvia_Prevista_3d: {row['Lluvia_Prevista_3d']:.1f} mm, "
+                    f"NDVI: {row['Sat_NDVI']:.2f}, ET0: {row['ET0_Calculada']:.1f} mm, {lluvia_p_col}: {row[lluvia_p_col]:.1f} mm, "
                     f"Potencial_Almendra: {row['FP_Potencial_Min']:.1f} bar, Humedad_10cm: {row['FP_Humedad_10cm']:.1f}%, Riego_Histórico: {row['Riego_mm_Real']:.1f} mm"
                 )
                 prompt = (
                     f"<|begin_of_text|>system\nEres un Orquestador Agrónomo de precisión experto en Riego Deficitario Controlado.<|eot_id|>"
-                    f"user\nAudita la eficiencia del riego e indica prescripción agronómica detallada para el {self.sector_name} (Almendro).\nContexto: {input_prompt}<|eot_id|>"
+                    f"user\nAudita la eficiencia del riego e indica prescripción agronómica detallada para el {self.nombre_sector} (Almendro).\nContexto: {input_prompt}<|eot_id|>"
                     f"assistant\n"
                 )
                 inputs = self.tokenizer(prompt, return_tensors="pt").to(device)
@@ -974,18 +1188,18 @@ class AgroProductionReport:
                 if match:
                     dosis_mm = float(match.group(1))
                 else:
-                    _, dosis_mm = self._generate_rule_based_presc(row)
+                    _, dosis_mm = self._generate_rule_based_presc(row, etc_rep)
             except Exception as e:
                 logger.error(f"Inferencia del LLM fallida. Usando motor experto alternativo de reglas. Error: {e}")
-                advice, dosis_mm = self._generate_rule_based_presc(row)
+                advice, dosis_mm = self._generate_rule_based_presc(row, etc_rep)
         else:
-            advice, dosis_mm = self._generate_rule_based_presc(row)
+            advice, dosis_mm = self._generate_rule_based_presc(row, etc_rep)
 
         # Total water volume & scheduling
         volumen_m3 = (dosis_mm * self.area_s3) / 1000.0
-        # Irrigation hours: assuming a nominal system precipitation rate of 1.2 mm/h
-        irr_hours = dosis_mm / 1.2
-        turns = 2 if irr_hours > 6 else 1
+        # Irrigation hours
+        irr_hours = dosis_mm / self.precipitation_rate
+        turns = max(1, int(np.ceil(irr_hours / 6.0)))
         hours_per_turn = irr_hours / turns
 
         # Create plots
@@ -993,7 +1207,7 @@ class AgroProductionReport:
         plot_balance_path, plot_evol_path = self._generate_plots(row, history_df)
 
         # PDF Compilation
-        pdf = AgroPDF()
+        pdf = AgroPDF(nombre_sector=self.nombre_sector)
         pdf.add_page()
         pdf.set_text_color(*C_TEXT)
         
@@ -1004,19 +1218,63 @@ class AgroProductionReport:
         pdf.cell(90, 4, f"Fecha Análisis: {date_str} | Cultivo: {self.nombre_cultivo}", align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(2)
 
-        # 1. Executive summary card
-        pdf.section_header("1. RESUMEN EJECUTIVO Y RELEVANCIA")
+        # SECTION 1: RECOMENDACIÓN / PLAN DE APLICACIÓN DE RIEGO (PRÓXIMOS {self.days} DÍAS)
+        pdf.section_header(f"1. PLAN DE APLICACIÓN DE RIEGO (PRÓXIMOS {self.days} DÍAS)")
+        if dosis_mm > 15:
+            # Warning orange box
+            pdf.set_fill_color(254, 243, 199)
+            pdf.set_draw_color(245, 158, 11)
+            text_color = (180, 83, 9)
+        else:
+            # OK green box
+            pdf.set_fill_color(240, 250, 240)
+            pdf.set_draw_color(34, 197, 94)
+            text_color = C_PRIMARY
+            
+        pdf.set_font("helvetica", "B", 10.5)
+        pdf.set_text_color(*text_color)
+        pdf.cell(0, 6, "  PLAN DE APLICACIÓN FÍSICA PARA EL AGRICULTOR", border="TLR", fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        
         pdf.set_font("helvetica", "", 9.5)
-        pdf.set_text_color(50)
-        pdf.multi_cell(0, 5, 
-            f"El {self.nombre_sector} de la finca {self.nombre_finca} está clasificado como área de alta prioridad operativa debido a su suelo franco-arenoso, "
-            "el cual presenta un drenaje rápido y una baja capacidad de retención de agua. "
-            "El monitoreo continuo a nivel foliar (FloraPulse) y radicular es indispensable para coordinar el "
-            "Riego Deficitario Controlado (RDC), maximizando la eficiencia de uso del agua en esta fase."
-        )
+        pdf.set_text_color(*C_TEXT)
+        pdf.cell(90, 6, f"    * Dosis Total Recomendada: {dosis_mm:.1f} mm", border="L", fill=True)
+        pdf.cell(90, 6, f"    * Volumen Total a Aplicar: {volumen_m3:.1f} m³", border="R", fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+        pdf.cell(90, 6, f"    * Tiempo de Riego Estimado: {irr_hours:.1f} horas", border="L", fill=True)
+        pdf.cell(90, 6, f"    * Caudal Nominal de Diseño: {self.precipitation_rate:.2f} mm/h", border="R", fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+        pdf.set_font("helvetica", "B", 9.5)
+        pdf.set_text_color(*C_PRIMARY)
+        pdf.cell(0, 7, f"    * Programación Sugerida: {turns} turnos de {hours_per_turn:.1f} horas cada uno", border="LBR", fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(3)
 
-        # 2. KPI Dashboard Cards (3 Columns)
+        # SECTION 2: INFORME DEL AGENTE IA XAI (ESTRATEGIA Y RECOMENDACIÓN)
+        pdf.section_header("2. INFORME DEL AGENTE IA XAI (ESTRATEGIA Y RECOMENDACIÓN)")
+        y_start = pdf.get_y()
+        # Draw background card
+        pdf.set_fill_color(*C_BG_CARD)
+        pdf.set_draw_color(220, 225, 220)
+        pdf.rect(15, y_start, 180, 32, "FD")
+        pdf.set_xy(17, y_start + 2)
+        pdf.set_font("helvetica", "", 9)
+        pdf.set_text_color(50)
+        pdf.write_html(advice.strip())
+        pdf.set_y(y_start + 32 + 3)
+
+        # SECTION 3: RESUMEN EJECUTIVO Y RELEVANCIA
+        pdf.section_header("3. RESUMEN EJECUTIVO Y RELEVANCIA")
+        pdf.set_font("helvetica", "", 9.5)
+        pdf.set_text_color(50)
+        pdf.write_html(
+            f"El <b>{self.nombre_sector}</b> de la finca <b>{self.nombre_finca}</b> está clasificado como área de alta prioridad operativa debido a su suelo <b>franco-arenoso</b>, "
+            "el cual presenta un <b><u>drenaje rápido</u></b> y una <b><u>baja capacidad de retención de agua</u></b>. "
+            "El monitoreo continuo a nivel radicular es indispensable para coordinar el "
+            "<b>Riego Deficitario Controlado (RDC)</b>, maximizando la eficiencia de uso del agua en esta fase de desarrollo."
+        )
+        pdf.ln(4)
+
+        # SECTION 4: INDICADORES CLAVE DE RENDIMIENTO (KPI)
+        pdf.section_header("4. INDICADORES CLAVE DE RENDIMIENTO (KPI)")
         pdf.set_fill_color(*C_BG_CARD)
         pdf.set_draw_color(220, 225, 220)
         y_kpis = pdf.get_y()
@@ -1038,57 +1296,60 @@ class AgroProductionReport:
         pdf.set_text_color(80)
         pdf.cell(53, 4, estado_vigor)
 
-        # Col 2: Water stress
+        # Col 2: Soil moisture at 40cm
         pdf.set_xy(78, y_kpis + 2)
         pdf.set_font("helvetica", "B", 8)
         pdf.set_text_color(*C_PRIMARY)
-        pdf.cell(53, 4, "ESTRÉS FOLIAR (TALLO)", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(53, 4, "HUMEDAD SUELO (40cm)", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.set_xy(78, y_kpis + 7)
         pdf.set_font("helvetica", "B", 12)
-        pot_val = row['FP_Potencial_Min']
-        stress_color = C_ALERT if pot_val < -12 else C_SECONDARY
-        pdf.set_text_color(*stress_color)
-        pdf.cell(53, 6, f"{pot_val:.1f} bar", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_text_color(41, 128, 185)
+        pdf.cell(53, 6, f"{row['FP_Humedad_40cm']:.1f}%", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.set_xy(78, y_kpis + 14)
         pdf.set_font("helvetica", "", 8)
         pdf.set_text_color(80)
-        pdf.cell(53, 4, f"Nivel: {stress_desc}")
+        pdf.cell(53, 4, "Zona Radicular Activa")
 
-        # Col 3: Soil moisture
+        # Col 3: Soil moisture at 10cm
         pdf.set_xy(140, y_kpis + 2)
         pdf.set_font("helvetica", "B", 8)
         pdf.set_text_color(*C_PRIMARY)
-        pdf.cell(53, 4, "HUMEDAD RADICULAR (40cm)", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(53, 4, "HUMEDAD SUELO (10cm)", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.set_xy(140, y_kpis + 7)
         pdf.set_font("helvetica", "B", 12)
         pdf.set_text_color(33, 33, 33)
-        pdf.cell(53, 6, f"{row['FP_Humedad_40cm']:.1f}%", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(53, 6, f"{row['FP_Humedad_10cm']:.1f}%", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.set_xy(140, y_kpis + 14)
         pdf.set_font("helvetica", "", 8)
         pdf.set_text_color(80)
-        pdf.cell(53, 4, f"Prof. Drenaje 60cm: {row['FP_Humedad_60cm']:.1f}%")
+        pdf.cell(53, 4, f"Humedad 20cm: {row['FP_Humedad_20cm']:.1f}%")
 
-        pdf.set_xy(15, y_kpis + 28)
+        # PAGE 2: Crop details
+        pdf.add_page()
+        pdf.set_font("helvetica", "", 8)
+        pdf.set_text_color(100)
+        pdf.cell(90, 4, f"ID PARCELA: {self.nombre_sector} | Fecha Análisis: {date_str}")
+        pdf.cell(90, 4, f"Orquestador Agro-XAI", align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(2)
 
-        # 3. Align images side-by-side dynamically
-        pdf.section_header("2. IMAGEN DE CULTIVO Y BALANCE CLIMÁTICO")
+        # SECTION 5: IMAGEN DE CULTIVO Y BALANCE CLIMÁTICO
+        pdf.section_header("5. IMAGEN DE CULTIVO Y BALANCE CLIMÁTICO")
         y_imgs = pdf.get_y()
-        img_h = 65
         if img_sat_path and os.path.exists(img_sat_path):
-            pdf.image(img_sat_path, x=15, y=y_imgs, w=75, h=img_h)
+            pdf.image(img_sat_path, x=15, y=y_imgs, w=90, h=45)
             
         if os.path.exists(plot_balance_path):
-            pdf.image(plot_balance_path, x=105, y=y_imgs, w=90, h=img_h)
+            pdf.image(plot_balance_path, x=110, y=y_imgs, w=85, h=50)
 
-        pdf.set_y(y_imgs + img_h + 2)
+        pdf.set_y(y_imgs + 52)
         pdf.set_font("helvetica", "I", 8)
         pdf.set_text_color(120)
-        pdf.cell(75, 4, "Vista Sentinel-2 RGB Parcela", align="C")
-        pdf.cell(115, 4, "Demanda (ET0) vs Precipitación", align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(90, 4, "Radiografía del Cultivo (Satélite Real / NDVI)")
+        pdf.cell(90, 4, "Balance Hídrico Operativo (ET0 vs Precipitaciones)", align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(3)
 
-        # Data Table
+        # SECTION 6: DETALLE DE PARÁMETROS OPERATIVOS
+        pdf.section_header("6. DETALLE DE PARÁMETROS OPERATIVOS")
         pdf.set_fill_color(240, 245, 240)
         pdf.set_draw_color(220, 220, 220)
         pdf.set_font("helvetica", "B", 8)
@@ -1109,103 +1370,56 @@ class AgroProductionReport:
 
         pdf.cell(35, 6, "Evapotranspiración", border=1)
         pdf.cell(30, 6, f"{row['ET0_Calculada']:.1f} mm/día", border=1)
-        pdf.cell(30, 6, f"ETc: {row['ETc_Sector3']:.1f} mm/día", border=1)
+        pdf.cell(30, 6, f"ETc: {etc_rep:.1f} mm/día", border=1)
         pdf.cell(85, 6, f"Demanda real del cultivo moderada (Kc={row['Kc_Dinamico']:.2f})", border=1, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
         pdf.cell(35, 6, "Precipitación (AEMET)", border=1)
         pdf.cell(30, 6, f"{row['Lluvia_AEMET']:.1f} mm", border=1)
-        pdf.cell(30, 6, f"3 días: {row['Lluvia_Prevista_3d']:.1f} mm", border=1)
+        pdf.cell(30, 6, f"{self.days} días: {row[lluvia_p_col]:.1f} mm", border=1)
         pdf.cell(85, 6, "Sin precipitaciones significativas. Balance neto negativo.", border=1, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(3)
 
-        # PAGE 2: Crop water stress, evolution chart & irrigation prescription
-        pdf.add_page()
-        pdf.set_font("helvetica", "", 8)
-        pdf.set_text_color(100)
-        pdf.cell(90, 4, f"ID PARCELA: Sector 3 | Fecha Análisis: {date_str}")
-        pdf.cell(90, 4, f"Orquestador Agro-XAI", align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.ln(2)
-
-        pdf.section_header("3. FISIOLOGÍA DEL CULTIVO Y EVOLUCIÓN")
+        # SECTION 7: HUMEDAD DEL SUELO Y EVOLUCIÓN
+        pdf.section_header("7. HUMEDAD DEL SUELO Y EVOLUCIÓN")
         y_chart2 = pdf.get_y()
         if os.path.exists(plot_evol_path):
             pdf.image(plot_evol_path, x=15, y=y_chart2, w=180, h=65)
             pdf.set_y(y_chart2 + 67)
             pdf.ln(2)
 
-        # Soil & Potential Table
+        # Soil & Moisture Table
         pdf.set_font("helvetica", "B", 8)
         pdf.set_text_color(*C_PRIMARY)
         pdf.set_fill_color(240, 245, 240)
-        pdf.cell(45, 6, "Sensor", border=1, fill=True)
-        pdf.cell(45, 6, "Medida", border=1, fill=True)
-        pdf.cell(90, 6, "Análisis Agronómico y Umbrales", border=1, fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(45, 6, "Sensor / Canal", border=1, fill=True)
+        pdf.cell(45, 6, "Medida (%)", border=1, fill=True)
+        pdf.cell(90, 6, "Análisis Agronómico y Recomendaciones de Humedad", border=1, fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
         pdf.set_font("helvetica", "", 8.5)
         pdf.set_text_color(*C_TEXT)
-        pdf.cell(45, 6, "Tallo FloraPulse", border=1)
-        pdf.cell(45, 6, f"{row['FP_Potencial_Min']:.1f} bar (Base: {row['FP_Potencial_Base_Min']:.1f})", border=1)
-        diff_pot = row['FP_Potencial_Min'] - row['FP_Potencial_Base_Min']
-        pdf.cell(90, 6, f"Diferencia foliar: {diff_pot:+.1f} bar. Estado: {stress_desc}", border=1, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
         pdf.cell(45, 6, "Humedad Suelo 10-20cm", border=1)
         pdf.cell(45, 6, f"10cm: {row['FP_Humedad_10cm']:.1f}% | 20cm: {row['FP_Humedad_20cm']:.1f}%", border=1)
-        pdf.cell(90, 6, "Humedad adecuada en la zona radicular superficial.", border=1, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(90, 6, "Humedad adecuada en la zona radicular superficial para el crecimiento.", border=1, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
         pdf.cell(45, 6, "Humedad Suelo 40-60cm", border=1)
         pdf.cell(45, 6, f"40cm: {row['FP_Humedad_40cm']:.1f}% | 60cm: {row['FP_Humedad_60cm']:.1f}%", border=1)
-        pdf.cell(90, 6, "Zona de absorción profunda activa. Drenaje controlado.", border=1, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.ln(4)
-
-        # 4. AI Auditoria Card
-        pdf.section_header("4. AUDITORÍA OPERATIVA E INFORME DEL AGENTE IA XAI")
-        pdf.set_fill_color(*C_BG_CARD)
-        pdf.set_draw_color(220, 225, 220)
-        pdf.set_font("helvetica", "", 9)
-        pdf.set_text_color(50)
-        pdf.multi_cell(0, 5.2, advice.strip(), border=1, fill=True)
-        pdf.ln(4)
-
-        # 5. Final prescription block for farmer
-        pdf.section_header("5. PLAN DE APLICACIÓN DE RIEGO (PRÓXIMOS 3 DÍAS)")
-
-        if dosis_mm > 15:
-            # Warning orange box
-            pdf.set_fill_color(254, 243, 199)
-            pdf.set_draw_color(245, 158, 11)
-            text_color = (180, 83, 9)
-        else:
-            # OK green box
-            pdf.set_fill_color(240, 250, 240)
-            pdf.set_draw_color(34, 197, 94)
-            text_color = *C_PRIMARY,
-            
-        pdf.set_font("helvetica", "B", 10.5)
-        pdf.set_text_color(*text_color)
-        pdf.cell(0, 6, "  PLAN DE APLICACIÓN FÍSICA PARA EL AGRICULTOR", border="TLR", fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        
-        pdf.set_font("helvetica", "", 9.5)
-        pdf.set_text_color(*C_TEXT)
-        pdf.cell(90, 6, f"    * Dosis Total Recomendada: {dosis_mm:.1f} mm", border="L", fill=True)
-        pdf.cell(90, 6, f"    * Volumen Total a Aplicar: {volumen_m3:.1f} m³", border="R", fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-
-        pdf.cell(90, 6, f"    * Tiempo de Riego Estimado: {irr_hours:.1f} horas", border="L", fill=True)
-        pdf.cell(90, 6, f"    * Caudal Nominal de Diseño: 1.2 mm/h", border="R", fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-
-        pdf.set_font("helvetica", "B", 9.5)
-        pdf.set_text_color(*C_PRIMARY)
-        pdf.cell(0, 7, f"    * Programación Sugerida: {turns} turnos de {hours_per_turn:.1f} horas cada uno", border="LBR", fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(90, 6, "Zona de absorción profunda activa. Drenaje controlado sin pérdidas.", border=1, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(4)
 
         # Disclaimer
         pdf.set_font("helvetica", "I", 8.5)
         pdf.set_text_color(120)
         pdf.multi_cell(0, 4.5, 
-            "Aviso: La recomendación de riego se basa en el balance del cultivo (ETc) y la respuesta fisiológica de la planta (potencial foliar FloraPulse). "
+            "Aviso: La recomendación de riego se basa en el balance del cultivo (ETc), el vigor foliar satelital (NDVI) y la humedad medida en el suelo. "
             "Se asume un diseño estándar de riego por goteo con doble tubería lateral. Ajustar los turnos según la disponibilidad de energía eléctrica y el caudal real de cabezal."
         )
 
         if output_pdf_name is None:
-            suffix = "V4" if self.is_carralancha else "S3"
+            if self.is_carralancha:
+                suffix = f"V4_{self.days}d"
+            else:
+                suffix = f"S{self.sector}_{self.days}d"
             output_pdf_name = f"Prescripcion_{suffix}_{date_str}.pdf"
             
         pdf.output(output_pdf_name)
@@ -1219,11 +1433,14 @@ class AgroProductionReport:
 
 # ==========================================
 # 5. MAIN ENTRY POINT & ARGUMENT PARSING
-# ==========================================
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Orquestador de Riego Agro-XAI con FloraPulse")
     parser.add_argument("--finca", type=str, default="canduela", choices=["canduela", "carralancha"],
                         help="Finca a procesar: canduela o carralancha.")
+    parser.add_argument("--sector", type=int, default=3, choices=[2, 3],
+                        help="Sector a procesar (solo aplicable para canduela: 2 o 3).")
+    parser.add_argument("--days", type=int, default=3, choices=[3, 5],
+                        help="Número de días para la recomendación de riego: 3 o 5.")
     parser.add_argument("--mode", type=str, default="all", choices=["all", "preprocess", "train_dl", "train_llm", "report"],
                         help="Modo de ejecución: preprocess (preprocesar datos), train_dl (entrenar modelo Two-Tower), train_llm (fine-tuning Llama), report (generar PDF) o all (completo).")
     parser.add_argument("--date", type=str, default=None, help="Fecha para el informe PDF (YYYY-MM-DD).")
@@ -1248,16 +1465,16 @@ if __name__ == "__main__":
     else:
         base_path = 'datos/canduela'
         if args.model_dl_path is None:
-            args.model_dl_path = 'models/modelo_percepcion_s3.pt'
+            args.model_dl_path = f'models/modelo_percepcion_s{args.sector}.pt'
         if args.adapter_path is None:
-            args.adapter_path = 'models/agro_llama_1b_s3_final'
+            args.adapter_path = f'models/agro_llama_1b_s{args.sector}_final'
         if args.date is None:
             args.date = '2024-08-10'
             
     os.makedirs(base_path, exist_ok=True)
     os.makedirs('datos/carralancha', exist_ok=True)
 
-    data_manager = AgroDataManager(base_path=base_path)
+    data_manager = AgroDataManager(base_path=base_path, sector=args.sector, days=args.days)
     
     # Run Preprocess (Required for all modes)
     df_master = data_manager.process_all()
@@ -1280,7 +1497,7 @@ if __name__ == "__main__":
 
     # LLM Dataset generation & training
     if args.mode in ["all", "train_llm"] or (args.mode == "all" and not args.skip_llm_train):
-        llm_optimizer = AgroLLMOptimizer(base_model_id=args.base_model_id, save_adapter_path=args.adapter_path, base_path=base_path)
+        llm_optimizer = AgroLLMOptimizer(base_model_id=args.base_model_id, save_adapter_path=args.adapter_path, base_path=base_path, sector=args.sector, days=args.days)
         llm_optimizer.generate_cot_dataset(df_master)
         
         if args.mode in ["all", "train_llm"] and not args.skip_llm_train:
@@ -1295,7 +1512,9 @@ if __name__ == "__main__":
             model_dl_path=args.model_dl_path,
             base_model_id=args.base_model_id,
             adapter_path=args.adapter_path,
-            base_path=base_path
+            base_path=base_path,
+            sector=args.sector,
+            days=args.days
         )
         report_generator.generate_report(args.date)
 
