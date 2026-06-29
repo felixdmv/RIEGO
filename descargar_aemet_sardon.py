@@ -75,7 +75,7 @@ def limpiar_y_formatear_aemet(df):
     return df
 
 def main():
-    output_dir = r"C:\Users\fdemiguel\OneDrive - Universidad de Burgos\Documentos\RIEGO\datos\canduela"
+    output_dir = os.path.join("datos", "canduela")
     output_path = os.path.join(output_dir, "AEMET_Sardon_historico.csv")
     
     if os.path.exists(output_path):

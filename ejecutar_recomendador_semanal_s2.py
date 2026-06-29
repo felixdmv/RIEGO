@@ -1,4 +1,5 @@
 import os
+import sys
 import subprocess
 import pandas as pd
 from datetime import datetime
@@ -11,7 +12,7 @@ def main():
     # 1. Descargar últimas mediciones climáticas de AEMET (Estación Sardón 2172Y)
     print("\n[Paso 1] Actualizando datos climáticos de AEMET (Estación Sardón de Duero)...")
     try:
-        subprocess.run(["C:\\Users\\fdemiguel\\AppData\\Local\\anaconda3\\envs\\agro_ft\\python.exe", "descargar_aemet_sardon.py"], check=True)
+        subprocess.run([sys.executable, "descargar_aemet_sardon.py"], check=True)
     except Exception as e:
         print(f"[AVISO] Error al actualizar AEMET, se utilizarán los datos locales existentes: {e}")
         
@@ -19,7 +20,7 @@ def main():
     print("\n[Paso 2] Consolidando Dataset Final (Dataset_Final_S2.csv)...")
     try:
         subprocess.run([
-            "C:\\Users\\fdemiguel\\AppData\\Local\\anaconda3\\envs\\agro_ft\\python.exe", 
+            sys.executable, 
             "run_pipeline.py", 
             "--finca", "canduela", 
             "--sector", "2",
@@ -32,7 +33,7 @@ def main():
 
     # 3. Generar informe de recomendación semanal para la fecha más reciente
     print("\n[Paso 3] Generando prescripción de riego semanal...")
-    csv_path = r"C:\Users\fdemiguel\OneDrive - Universidad de Burgos\Documentos\RIEGO\datos\canduela\Dataset_Final_S2.csv"
+    csv_path = os.path.join("datos", "canduela", "Dataset_Final_S2.csv")
     if os.path.exists(csv_path):
         df = pd.read_csv(csv_path)
         df['Fecha'] = pd.to_datetime(df['Fecha'])
@@ -43,7 +44,7 @@ def main():
         
         try:
             subprocess.run([
-                "C:\\Users\\fdemiguel\\AppData\\Local\\anaconda3\\envs\\agro_ft\\python.exe", 
+                sys.executable, 
                 "run_pipeline.py", 
                 "--finca", "canduela", 
                 "--sector", "2",
@@ -52,7 +53,7 @@ def main():
                 "--date", ultima_fecha_str
             ], check=True)
             print(f"\n[OK] ¡Proceso completado exitosamente!")
-            print(f"-> Se ha generado y guardado el PDF: Prescripcion_S2_5d_{ultima_fecha_str}.pdf")
+            print(f"-> Se ha generado y guardado el PDF: recomendaciones/Prescripcion_S2_5d_{ultima_fecha_str}.pdf")
             
             # Imprimir resumen de la recomendación en consola (alineado con la lógica de run_pipeline.py)
             row = df[df['Fecha'] == ultima_fecha].iloc[0]

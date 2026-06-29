@@ -65,7 +65,7 @@ def main():
                 "--date", ultima_fecha_str
             ], check=True)
             print(f"\n[OK] ¡Proceso completado exitosamente!")
-            print(f"-> Se ha generado y guardado el PDF: Prescripcion_V4_{ultima_fecha_str}.pdf")
+            print(f"-> Se ha generado y guardado el PDF: recomendaciones/Prescripcion_V4_{ultima_fecha_str}.pdf")
             
             # Imprimir resumen de la recomendación en consola
             # Leer el último día de datos consolidado para mostrar la prescripción

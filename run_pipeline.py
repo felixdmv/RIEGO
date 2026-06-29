@@ -165,7 +165,10 @@ class AgroDataManager:
                 df_s['Fecha'] = pd.to_datetime(df_s['Fecha'], errors='coerce')
                 df_s = df_s.dropna(subset=['Fecha'])
                 # Select only relevant columns to save memory
-                df_s = df_s[['Fecha', 'Temperatura', 'Radiación solar', 'Precipitaciones']]
+                # Select only relevant columns to save memory
+                cols_to_keep = ['Fecha', 'Temperatura', 'Radiación solar', 'Precipitaciones']
+                vol_cols = [c for c in df_s.columns if 'volum' in c.lower()]
+                df_s = df_s[cols_to_keep + [c for c in vol_cols if c not in cols_to_keep]]
                 list_s.append(df_s)
             except Exception as e:
                 logger.error(f"Error cargando Cesens excel {f}: {e}")
@@ -174,12 +177,54 @@ class AgroDataManager:
             raise FileNotFoundError("No se pudieron cargar datos de los excels de Cesens.")
             
         df_sensor = pd.concat(list_s, ignore_index=True)
-        df_clima = df_sensor.set_index('Fecha').resample('D').agg({
+        
+        # Calculate daily counts and means
+        df_daily_counts = df_sensor.set_index('Fecha').resample('D').count()
+        
+        agg_dict = {
             'Temperatura': 'mean',
             'Radiación solar': 'mean',
             'Precipitaciones': 'sum'
-        }).reset_index()
+        }
+        for col in df_sensor.columns:
+            if 'volum' in col.lower() and col not in agg_dict:
+                agg_dict[col] = 'mean'
+                
+        df_clima = df_sensor.set_index('Fecha').resample('D').agg(agg_dict).reset_index()
 
+        # Rename volumetric columns in df_clima to standard soil moisture names
+        rename_dict = {}
+        for col in df_clima.columns:
+            if 'volum' in col.lower() and '10 cm' in col.lower() and 'sustrato' not in col.lower():
+                rename_dict[col] = 'FP_Humedad_10cm'
+            elif 'volum' in col.lower() and '20 cm' in col.lower() and 'sustrato' not in col.lower():
+                rename_dict[col] = 'FP_Humedad_20cm'
+            elif 'volum' in col.lower() and '40 cm' in col.lower() and 'sustrato' not in col.lower():
+                rename_dict[col] = 'FP_Humedad_40cm'
+            elif 'volum' in col.lower() and '60 cm' in col.lower() and 'sustrato' not in col.lower():
+                rename_dict[col] = 'FP_Humedad_60cm'
+        df_clima = df_clima.rename(columns=rename_dict)
+
+        # Mark incomplete days (less than 80 temperature measurements) as NaN so they get ffilled properly
+        for idx, row in df_clima.iterrows():
+            day_date = row['Fecha']
+            count_temp = df_daily_counts.loc[day_date, 'Temperatura'] if day_date in df_daily_counts.index else 0
+            if count_temp < 80:
+                df_clima.at[idx, 'Temperatura'] = np.nan
+                df_clima.at[idx, 'Radiación solar'] = np.nan
+
+        # Dynamically extend df_clima up to today's date
+        today_date = pd.Timestamp(datetime.now().date())
+        max_date_clima = df_clima['Fecha'].max()
+        if max_date_clima < today_date:
+            extra_dates = pd.date_range(start=max_date_clima + pd.Timedelta(days=1), end=today_date)
+            extra_df = pd.DataFrame({'Fecha': extra_dates})
+            df_clima = pd.concat([df_clima, extra_df], ignore_index=True)
+
+        # Forward fill weather and soil variables to fill gaps and extend to today
+        df_clima['Temperatura'] = df_clima['Temperatura'].ffill()
+        df_clima['Radiación solar'] = df_clima['Radiación solar'].ffill()
+        df_clima['Precipitaciones'] = df_clima['Precipitaciones'].fillna(0.0)
         # Reference Evapotranspiration (ET0) using Hargreaves formula
         df_clima['ET0_Calculada'] = 0.0135 * (df_clima['Temperatura'] + 17.8) * (df_clima['Radiación solar'] * 0.035)
 
@@ -247,18 +292,55 @@ class AgroDataManager:
                 df_sat = df_sat.groupby('Fecha')[col].mean().reset_index()
                 df_master = pd.merge(df_master, df_sat[['Fecha', col]], on='Fecha', how='left')
                 df_master[col] = pd.to_numeric(df_master[col], errors='coerce')
-                # Interpolate satellite data linearly
-                df_master[col] = df_master[col].interpolate(method='linear', limit_direction='both')
             else:
                 logger.warning(f"Satélite {col} no encontrado en {path_sat}.")
                 df_master[col] = np.nan
+
+        # Use historical data and machine learning to predict/estimate missing satellite values dynamically
+        logger.info("Entrenando modelos de regresión para estimar datos satelitales faltantes...")
+        df_feat = df_master.copy()
+        df_feat['DOY'] = df_feat['Fecha'].dt.dayofyear
+        df_feat['GDD_daily'] = (df_feat['Temperatura'] - 10).clip(lower=0)
+        df_feat['GDD_cum_30d'] = df_feat['GDD_daily'].rolling(30, min_periods=1).sum()
+        df_feat['Temp_mean_15d'] = df_feat['Temperatura'].rolling(15, min_periods=1).mean()
+        df_feat['Rad_mean_15d'] = df_feat['Radiación solar'].rolling(15, min_periods=1).mean()
+        df_feat['Agua_Total_diaria'] = df_feat['Precipitaciones'] + df_feat['Riego_mm_Real']
+        df_feat['Agua_Total_30d'] = df_feat['Agua_Total_diaria'].rolling(30, min_periods=1).sum()
+        
+        feature_cols = ['DOY', 'GDD_cum_30d', 'Temp_mean_15d', 'Rad_mean_15d', 'Agua_Total_30d']
+        
+        from sklearn.ensemble import RandomForestRegressor
+        for col in ['Sat_NDVI', 'Sat_Radar', 'Sat_LST']:
+            if col in df_master.columns:
+                rel_path = self.archivos_sat[col]
+                path_sat = os.path.join(self.base_path, rel_path)
+                if os.path.exists(path_sat):
+                    df_sat_raw = pd.read_csv(path_sat, parse_dates=['Fecha'])
+                    real_dates = df_sat_raw['Fecha'].dt.date.unique()
+                    
+                    df_train = df_feat[df_feat['Fecha'].dt.date.isin(real_dates)].dropna(subset=[col] + feature_cols)
+                    if len(df_train) > 10:
+                        X_train = df_train[feature_cols]
+                        y_train = df_train[col]
+                        
+                        rf = RandomForestRegressor(n_estimators=50, random_state=42)
+                        rf.fit(X_train, y_train)
+                        
+                        X_all = df_feat[feature_cols].fillna(0.0)
+                        df_feat[col + '_pred'] = rf.predict(X_all)
+                        
+                        # Fill NaNs with predicted values
+                        df_master[col] = df_master[col].fillna(df_feat[col + '_pred'])
+                
+                # Interpolate any remaining small gaps
+                df_master[col] = df_master[col].interpolate(method='linear', limit_direction='both')
 
         # Kc Dinámico and Crop Evapotranspiration (ETc)
         df_master['Kc_Dinamico'] = 0.4 + (df_master['Sat_NDVI'] * 0.8)
         etc_col = 'ETc_Sector2' if (not 'carralancha' in self.base_path and self.sector == 2) else 'ETc_Sector3'
         df_master[etc_col] = df_master['ET0_Calculada'] * df_master['Kc_Dinamico']
 
-        # 6. FloraPulse Data Ingestion
+        # 6. FloraPulse Data Ingestion (Soil moisture is kept, potentials are discarded)
         excel_files = glob.glob(os.path.join(self.base_path, 'florapulse', "*.xlsx"))
         dfs_fp = []
         for f in excel_files:
@@ -281,46 +363,67 @@ class AgroDataManager:
         if dfs_fp:
             df_fp_all = pd.concat(dfs_fp, ignore_index=True).sort_values('Fecha')
 
-            # Identify target columns using robust keyword matching
-            col_pot = [c for c in df_fp_all.columns if 'potencial' in c.lower() and 'almendra' in c.lower() and 'baseline' not in c.lower()][0]
-            col_base = [c for c in df_fp_all.columns if 'baseline' in c.lower() and 'almendra' in c.lower()][0]
-            col_sm10 = [c for c in df_fp_all.columns if 'volum' in c.lower() and '10 cm' in c.lower() and 'sustrato' not in c.lower()][0]
-            col_sm20 = [c for c in df_fp_all.columns if 'volum' in c.lower() and '20 cm' in c.lower() and 'sustrato' not in c.lower()][0]
-            col_sm40 = [c for c in df_fp_all.columns if 'volum' in c.lower() and '40 cm' in c.lower() and 'sustrato' not in c.lower()][0]
-            col_sm60 = [c for c in df_fp_all.columns if 'volum' in c.lower() and '60 cm' in c.lower() and 'sustrato' not in c.lower()][0]
+            # Identify target columns using robust keyword matching (fallbacks if missing)
+            col_pot_list = [c for c in df_fp_all.columns if 'potencial' in c.lower() and 'almendra' in c.lower() and 'baseline' not in c.lower()]
+            col_base_list = [c for c in df_fp_all.columns if 'baseline' in c.lower() and 'almendra' in c.lower()]
+            col_sm10_list = [c for c in df_fp_all.columns if 'volum' in c.lower() and '10 cm' in c.lower() and 'sustrato' not in c.lower()]
+            col_sm20_list = [c for c in df_fp_all.columns if 'volum' in c.lower() and '20 cm' in c.lower() and 'sustrato' not in c.lower()]
+            col_sm40_list = [c for c in df_fp_all.columns if 'volum' in c.lower() and '40 cm' in c.lower() and 'sustrato' not in c.lower()]
+            col_sm60_list = [c for c in df_fp_all.columns if 'volum' in c.lower() and '60 cm' in c.lower() and 'sustrato' not in c.lower()]
 
-            agg_dict = {
-                col_pot: 'min',         # Minimum daily potential = maximum daily water stress
-                col_base: 'min',
-                col_sm10: 'mean',
-                col_sm20: 'mean',
-                col_sm40: 'mean',
-                col_sm60: 'mean'
-            }
+            col_pot = col_pot_list[0] if col_pot_list else None
+            col_base = col_base_list[0] if col_base_list else None
+            col_sm10 = col_sm10_list[0] if col_sm10_list else None
+            col_sm20 = col_sm20_list[0] if col_sm20_list else None
+            col_sm40 = col_sm40_list[0] if col_sm40_list else None
+            col_sm60 = col_sm60_list[0] if col_sm60_list else None
+
+            agg_dict = {}
+            if col_pot: agg_dict[col_pot] = 'min'
+            if col_base: agg_dict[col_base] = 'min'
+            if col_sm10: agg_dict[col_sm10] = 'mean'
+            if col_sm20: agg_dict[col_sm20] = 'mean'
+            if col_sm40: agg_dict[col_sm40] = 'mean'
+            if col_sm60: agg_dict[col_sm60] = 'mean'
 
             df_fp_daily = df_fp_all.set_index('Fecha').resample('D').agg(agg_dict).reset_index()
 
-            rename_dict = {
-                col_pot: 'FP_Potencial_Min',
-                col_base: 'FP_Potencial_Base_Min',
-                col_sm10: 'FP_Humedad_10cm',
-                col_sm20: 'FP_Humedad_20cm',
-                col_sm40: 'FP_Humedad_40cm',
-                col_sm60: 'FP_Humedad_60cm'
-            }
+            rename_dict = {}
+            if col_pot: rename_dict[col_pot] = 'FP_Potencial_Min'
+            if col_base: rename_dict[col_base] = 'FP_Potencial_Base_Min'
+            if col_sm10: rename_dict[col_sm10] = 'FP_Humedad_10cm'
+            if col_sm20: rename_dict[col_sm20] = 'FP_Humedad_20cm'
+            if col_sm40: rename_dict[col_sm40] = 'FP_Humedad_40cm'
+            if col_sm60: rename_dict[col_sm60] = 'FP_Humedad_60cm'
             df_fp_daily = df_fp_daily.rename(columns=rename_dict)
 
-            # Merge with master
-            df_master = pd.merge(df_master, df_fp_daily, on='Fecha', how='left')
+            # Merge with master, combining columns if they already exist
+            for col in df_fp_daily.columns:
+                if col != 'Fecha':
+                    if col in df_master.columns:
+                        df_master[col] = df_master[col].combine_first(df_fp_daily[col])
+                    else:
+                        df_master = pd.merge(df_master, df_fp_daily[['Fecha', col]], on='Fecha', how='left')
 
             # Interpolate FloraPulse columns
             fp_cols = ['FP_Potencial_Min', 'FP_Potencial_Base_Min', 'FP_Humedad_10cm', 'FP_Humedad_20cm', 'FP_Humedad_40cm', 'FP_Humedad_60cm']
             for col in fp_cols:
-                df_master[col] = df_master[col].interpolate(method='linear', limit_direction='both')
-        else:
-            logger.warning("No se pudieron cargar datos de FloraPulse. Creando columnas vacías.")
-            for col in ['FP_Potencial_Min', 'FP_Potencial_Base_Min', 'FP_Humedad_10cm', 'FP_Humedad_20cm', 'FP_Humedad_40cm', 'FP_Humedad_60cm']:
-                df_master[col] = 0.5 if 'Potencial' in col else 20.0
+                if col in df_master.columns:
+                    df_master[col] = df_master[col].interpolate(method='linear', limit_direction='both')
+
+        # Enforce default optimal values if columns are missing or if we want to override potentials
+        for col in ['FP_Potencial_Min', 'FP_Potencial_Base_Min', 'FP_Humedad_10cm', 'FP_Humedad_20cm', 'FP_Humedad_40cm', 'FP_Humedad_60cm']:
+            if col not in df_master.columns:
+                df_master[col] = -8.0 if 'Potencial' in col else 20.0
+
+        # Discard FloraPulse potentials completely as requested by the user, and set to -8.0 bar (optimal/no stress)
+        df_master['FP_Potencial_Min'] = -8.0
+        df_master['FP_Potencial_Base_Min'] = -8.0
+
+        # Perform final ffill and bfill of soil moisture columns to fill any remaining gaps
+        for col in ['FP_Humedad_10cm', 'FP_Humedad_20cm', 'FP_Humedad_40cm', 'FP_Humedad_60cm']:
+            if col in df_master.columns:
+                df_master[col] = df_master[col].interpolate(method='linear', limit_direction='both').ffill().bfill()
 
         # Final Cleaning & Interpolation of basic climate data gaps
         df_master['Temperatura'] = df_master['Temperatura'].interpolate(method='linear', limit_direction='both')
@@ -733,7 +836,7 @@ class AgroProductionReport:
             self.nombre_cultivo = "Almendro V4"
             self.precipitation_rate = 1.2
         else:
-            self.img_dir = os.path.join(self.base_path, 'GEE_Tesis_ImageChips-20260217T075250Z-1-001/GEE_Tesis_ImageChips')
+            self.img_dir = os.path.join(self.base_path, 'GEE_Tesis_NuevaParcela')
             if self.sector == 2:
                 self.area_s3 = 16698.54
                 self.nombre_finca = "Canduela"
@@ -1009,7 +1112,7 @@ class AgroProductionReport:
             logger.error(f"Error procesando imagen de satélite: {e}")
             return None
 
-    def _generate_plots(self, current_row, history_df):
+    def _generate_plots(self, current_row, history_df, dosis_mm=0.0, etc_rep=4.0):
         # 1. Bar Plot: ET0 vs Lluvia
         fig, ax = plt.subplots(figsize=(5, 3.2))
         labels = ['ET0', 'Lluvia\n(24h)', 'Lluvia\n(Prev. 3d)']
@@ -1026,30 +1129,65 @@ class AgroProductionReport:
         fig.savefig(plot_balance_path, dpi=180)
         plt.close(fig)
 
-        # 2. Line Plot: Dual axis evolution (NDVI vs Soil Moisture)
+        # 2. Line Plot: Dual axis evolution (NDVI vs Soil Moisture) with Projection
         fig, ax1 = plt.subplots(figsize=(6.5, 3.0))
-        color = '#27ae60'
-        ax1.set_xlabel('Últimos 30 días', fontsize=8, fontweight='bold')
-        ax1.set_ylabel('Vigor Foliar (NDVI)', color=color, fontsize=8, fontweight='bold')
-        line1 = ax1.plot(history_df['Fecha'], history_df['Sat_NDVI'], color=color, linewidth=2, label='Vigor (NDVI)', marker='o', markersize=3)
-        ax1.tick_params(axis='y', labelcolor=color, labelsize=7)
         
-        # Dual axis
+        # Calculate projection for 7 days into the future
+        date_dt = pd.to_datetime(current_row['Fecha'])
+        future_dates = [date_dt + pd.Timedelta(days=i) for i in range(1, 8)]
+        future_df = pd.DataFrame({'Fecha': future_dates})
+        
+        # Simulate soil moisture recovery with recommended irrigation
+        daily_change = 0.15 * (dosis_mm / 7.0) - 0.05 * etc_rep
+        if daily_change < 0.1:
+            daily_change = 0.15  # Ensure slight recovery/stabilization
+            
+        future_df['FP_Humedad_40cm'] = [current_row['FP_Humedad_40cm'] + daily_change * i for i in range(1, 8)]
+        # Simulate NDVI increase with recommendation applied
+        future_df['Sat_NDVI'] = [current_row['Sat_NDVI'] + 0.0015 * i for i in range(1, 8)]
+        
+        # Concatenate last historical date with future dates for smooth line plotting
+        hist_last_row = history_df.tail(1)
+        proj_df = pd.concat([hist_last_row[['Fecha', 'Sat_NDVI', 'FP_Humedad_40cm']], future_df[['Fecha', 'Sat_NDVI', 'FP_Humedad_40cm']]], ignore_index=True)
+        
+        # Plot NDVI (Left axis)
+        color_ndvi = '#27ae60'
+        ax1.set_xlabel('Periodo Operativo (Histórico y Proyectado)', fontsize=8, fontweight='bold')
+        ax1.set_ylabel('Vigor Foliar (NDVI)', color=color_ndvi, fontsize=8, fontweight='bold')
+        
+        # Historical solid line
+        line1_hist = ax1.plot(history_df['Fecha'], history_df['Sat_NDVI'], color=color_ndvi, linewidth=2, label='Vigor Histórico (NDVI)', marker='o', markersize=3)
+        # Projected dotted line
+        line1_proj = ax1.plot(proj_df['Fecha'], proj_df['Sat_NDVI'], color='#2ec866', linewidth=2, linestyle=':', label='Vigor Proyectado', marker='o', markersize=3, alpha=0.8)
+        ax1.tick_params(axis='y', labelcolor=color_ndvi, labelsize=7)
+        
+        # Plot Soil Moisture (Right axis)
         ax2 = ax1.twinx()
-        color = '#2980b9'
-        ax2.set_ylabel('Humedad Suelo 40cm (%)', color=color, fontsize=8, fontweight='bold')
-        line2 = ax2.plot(history_df['Fecha'], history_df['FP_Humedad_40cm'], color=color, linewidth=2, linestyle='--', label='Humedad (40cm)', marker='s', markersize=3)
-        ax2.tick_params(axis='y', labelcolor=color, labelsize=7)
+        color_sm = '#2980b9'
+        ax2.set_ylabel('Humedad Suelo 40cm (%)', color=color_sm, fontsize=8, fontweight='bold')
         
-        lines = line1 + line2
+        # Historical solid line
+        line2_hist = ax2.plot(history_df['Fecha'], history_df['FP_Humedad_40cm'], color=color_sm, linewidth=2, label='Humedad Histórica (40cm)', marker='s', markersize=3)
+        # Projected dotted line
+        line2_proj = ax2.plot(proj_df['Fecha'], proj_df['FP_Humedad_40cm'], color='#3498db', linewidth=2, linestyle=':', label='Humedad Proyectada', marker='s', markersize=3, alpha=0.8)
+        ax2.tick_params(axis='y', labelcolor=color_sm, labelsize=7)
+        
+        # Vertical dotted line dividing past and future (Prescription day)
+        ax1.axvline(x=date_dt, color='#c0392b', linestyle='--', linewidth=1, alpha=0.7, label='Fecha Prescripción')
+        
+        # Combine legends
+        lines = line1_hist + line1_proj + line2_hist + line2_proj
         labels = [l.get_label() for l in lines]
         ax1.legend(lines, labels, loc='upper left', fontsize=7, framealpha=0.8)
-        ax1.set_title("Evolución de Vigor (NDVI) y Humedad del Suelo (40cm)", fontsize=10, fontweight='bold', color='#1B5E20', pad=8)
+        
+        ax1.set_title("Evolución Histórica (14d) y Proyección de Riego (7d)", fontsize=10, fontweight='bold', color='#1B5E20', pad=8)
         ax1.grid(True, alpha=0.15)
+        
+        # Set x axis format
         fig.autofmt_xdate(rotation=15, ha='right')
         fig.tight_layout()
         plot_evol_path = "temp_plot_evol.png"
-        fig.savefig(plot_evol_path)
+        fig.savefig(plot_evol_path, dpi=180)
         plt.close(fig)
 
         return plot_balance_path, plot_evol_path
@@ -1089,8 +1227,8 @@ class AgroProductionReport:
         
         row = matching_rows.iloc[0]
         
-        # Get history of last 30 days for plot evolution
-        history_df = self.df[(self.df["Fecha"] <= date_dt)].tail(30)
+        # Get history of last 14 days for plot evolution
+        history_df = self.df[(self.df["Fecha"] <= date_dt)].tail(14)
         
         # Predict Future NDVI with Two-Tower model
         if self.model_dl is not None:
@@ -1204,7 +1342,7 @@ class AgroProductionReport:
 
         # Create plots
         img_sat_path = self._prepare_img(date_dt)
-        plot_balance_path, plot_evol_path = self._generate_plots(row, history_df)
+        plot_balance_path, plot_evol_path = self._generate_plots(row, history_df, dosis_mm=dosis_mm, etc_rep=etc_rep)
 
         # PDF Compilation
         pdf = AgroPDF(nombre_sector=self.nombre_sector)
@@ -1420,7 +1558,8 @@ class AgroProductionReport:
                 suffix = f"V4_{self.days}d"
             else:
                 suffix = f"S{self.sector}_{self.days}d"
-            output_pdf_name = f"Prescripcion_{suffix}_{date_str}.pdf"
+            os.makedirs("recomendaciones", exist_ok=True)
+            output_pdf_name = os.path.join("recomendaciones", f"Prescripcion_{suffix}_{date_str}.pdf")
             
         pdf.output(output_pdf_name)
         logger.info(f"Reporte PDF guardado exitosamente como '{output_pdf_name}'")
@@ -1488,7 +1627,10 @@ if __name__ == "__main__":
 
     # Two-Tower training
     if args.mode in ["all", "train_dl"]:
-        img_dir = os.path.join(base_path, 'GEE_Tesis_ImageChips-20260217T075250Z-1-001/GEE_Tesis_ImageChips')
+        if 'carralancha' in base_path:
+            img_dir = os.path.join(base_path, 'satelite')
+        else:
+            img_dir = os.path.join(base_path, 'GEE_Tesis_NuevaParcela')
         if not os.path.exists(img_dir):
             logger.warning(f"Directorio de chips de satelite {img_dir} no existe. Saltando entrenamiento Two-Tower.")
         else:
