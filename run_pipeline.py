@@ -112,9 +112,11 @@ class AgroDataManager:
             path_aemet = os.path.join(self.base_path, self.archivo_aemet)
             df_aemet = pd.read_csv(path_aemet, parse_dates=['Fecha']).sort_values('Fecha')
             df_aemet['Lluvia_Prevista_3d'] = df_aemet['Lluvia_AEMET'].shift(-1).rolling(3, min_periods=1).sum().shift(-2).fillna(0)
+            df_aemet['Lluvia_Prevista_5d'] = df_aemet['Lluvia_AEMET'].shift(-1).rolling(5, min_periods=1).sum().shift(-4).fillna(0)
+            df_aemet['Lluvia_Prevista_7d'] = df_aemet['Lluvia_AEMET'].shift(-1).rolling(7, min_periods=1).sum().shift(-6).fillna(0)
 
             # Merge
-            df_master = pd.merge(df_clima, df_aemet[['Fecha', 'Lluvia_Prevista_3d', 'Lluvia_AEMET']], on='Fecha', how='outer')
+            df_master = pd.merge(df_clima, df_aemet[['Fecha', 'Lluvia_Prevista_3d', 'Lluvia_Prevista_5d', 'Lluvia_Prevista_7d', 'Lluvia_AEMET']], on='Fecha', how='outer')
             df_master = pd.merge(df_master, df_crop_daily, on='Fecha', how='outer')
             df_master = df_master.sort_values('Fecha').reset_index(drop=True)
 
@@ -132,6 +134,8 @@ class AgroDataManager:
             df_master['Riego_mm_Real'] = df_master['Riego_mm_Real'].fillna(0)
             df_master['Lluvia_AEMET'] = df_master['Lluvia_AEMET'].fillna(0)
             df_master['Lluvia_Prevista_3d'] = df_master['Lluvia_Prevista_3d'].fillna(0)
+            df_master['Lluvia_Prevista_5d'] = df_master['Lluvia_Prevista_5d'].fillna(0)
+            df_master['Lluvia_Prevista_7d'] = df_master['Lluvia_Prevista_7d'].fillna(0)
             df_master['Precipitaciones'] = df_master['Precipitaciones'].fillna(0)
 
             cols_to_interpolate = ['Temperatura', 'Radiación solar', 'ET0_Calculada',
@@ -233,9 +237,10 @@ class AgroDataManager:
         if os.path.exists(path_aemet):
             df_aemet = pd.read_csv(path_aemet, parse_dates=['Fecha'])
             df_aemet = df_aemet.sort_values('Fecha')
-            # 3-day and 5-day accumulated rolling rain forecast
+            # 3-day, 5-day and 7-day accumulated rolling rain forecast
             df_aemet['Lluvia_Prevista_3d'] = df_aemet['Lluvia_AEMET'].shift(-1).rolling(3, min_periods=1).sum().shift(-2).fillna(0)
             df_aemet['Lluvia_Prevista_5d'] = df_aemet['Lluvia_AEMET'].shift(-1).rolling(5, min_periods=1).sum().shift(-4).fillna(0)
+            df_aemet['Lluvia_Prevista_7d'] = df_aemet['Lluvia_AEMET'].shift(-1).rolling(7, min_periods=1).sum().shift(-6).fillna(0)
         else:
             raise FileNotFoundError(f"No se encontró archivo de AEMET: {path_aemet}")
 
@@ -280,7 +285,7 @@ class AgroDataManager:
                 df_riego = pd.DataFrame(columns=['Fecha', 'Riego_mm_Real'])
 
         # 4. Merge base climate, AEMET, Riegos
-        df_master = pd.merge(df_clima, df_aemet[['Fecha', 'Lluvia_Prevista_3d', 'Lluvia_Prevista_5d', 'Lluvia_AEMET']], on='Fecha', how='outer')
+        df_master = pd.merge(df_clima, df_aemet[['Fecha', 'Lluvia_Prevista_3d', 'Lluvia_Prevista_5d', 'Lluvia_Prevista_7d', 'Lluvia_AEMET']], on='Fecha', how='outer')
         df_master = pd.merge(df_master, df_riego[['Fecha', 'Riego_mm_Real']], on='Fecha', how='left').fillna({'Riego_mm_Real': 0})
         df_master = df_master.sort_values('Fecha').reset_index(drop=True)
 
@@ -432,6 +437,7 @@ class AgroDataManager:
         df_master['Lluvia_AEMET'] = df_master['Lluvia_AEMET'].fillna(0)
         df_master['Lluvia_Prevista_3d'] = df_master['Lluvia_Prevista_3d'].fillna(0)
         df_master['Lluvia_Prevista_5d'] = df_master['Lluvia_Prevista_5d'].fillna(0)
+        df_master['Lluvia_Prevista_7d'] = df_master['Lluvia_Prevista_7d'].fillna(0)
         df_master['ET0_Calculada'] = df_master['ET0_Calculada'].interpolate(method='linear', limit_direction='both')
         df_master[etc_col] = df_master[etc_col].interpolate(method='linear', limit_direction='both')
 
@@ -1336,9 +1342,56 @@ class AgroProductionReport:
         # Total water volume & scheduling
         volumen_m3 = (dosis_mm * self.area_s3) / 1000.0
         # Irrigation hours
-        irr_hours = dosis_mm / self.precipitation_rate
-        turns = max(1, int(np.ceil(irr_hours / 6.0)))
-        hours_per_turn = irr_hours / turns
+        if dosis_mm <= 0:
+            irr_hours = 0.0
+            turns = 0
+            hours_per_turn = 0.0
+            irr_hours_str = "0 minutos"
+            hours_per_turn_str = "0 minutos"
+            days_str = "No se requiere riego"
+        else:
+            irr_hours = dosis_mm / self.precipitation_rate
+            turns = min(7, max(1, int(np.ceil(irr_hours / 6.0))))
+            hours_per_turn = irr_hours / turns
+            
+            def format_duration(h):
+                hrs = int(h)
+                mins = int(round((h - hrs) * 60))
+                if mins == 60:
+                    hrs += 1
+                    mins = 0
+                parts = []
+                if hrs > 0:
+                    parts.append(f"{hrs} {'hora' if hrs == 1 else 'horas'}")
+                if mins > 0:
+                    parts.append(f"{mins} {'minuto' if mins == 1 else 'minutos'}")
+                return " y ".join(parts) if parts else "0 minutos"
+
+            irr_hours_str = format_duration(irr_hours)
+            hours_per_turn_str = format_duration(hours_per_turn)
+
+            # Determine irrigation days starting Tuesday (since recommendation is made on Monday to apply from Tuesday)
+            if turns == 1:
+                days_list = ["Martes"]
+            elif turns == 2:
+                days_list = ["Martes", "Viernes"]
+            elif turns == 3:
+                days_list = ["Martes", "Jueves", "Sábado"]
+            elif turns == 4:
+                days_list = ["Martes", "Jueves", "Sábado", "Lunes"]
+            elif turns == 5:
+                days_list = ["Martes", "Miércoles", "Viernes", "Sábado", "Lunes"]
+            elif turns == 6:
+                days_list = ["Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+            else:
+                days_list = ["Todos los días (de Martes a Lunes)"]
+                
+            if len(days_list) == 1:
+                days_str = days_list[0]
+            elif len(days_list) > 1 and days_list[0] != "Todos los días (de Martes a Lunes)":
+                days_str = ", ".join(days_list[:-1]) + " y " + days_list[-1]
+            else:
+                days_str = days_list[0]
 
         # Create plots
         img_sat_path = self._prepare_img(date_dt)
@@ -1378,12 +1431,17 @@ class AgroProductionReport:
         pdf.cell(90, 6, f"    * Dosis Total Recomendada: {dosis_mm:.1f} mm", border="L", fill=True)
         pdf.cell(90, 6, f"    * Volumen Total a Aplicar: {volumen_m3:.1f} m³", border="R", fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
-        pdf.cell(90, 6, f"    * Tiempo de Riego Estimado: {irr_hours:.1f} horas", border="L", fill=True)
+        pdf.cell(90, 6, f"    * Tiempo de Riego Estimado: {irr_hours_str}", border="L", fill=True)
         pdf.cell(90, 6, f"    * Caudal Nominal de Diseño: {self.precipitation_rate:.2f} mm/h", border="R", fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
         pdf.set_font("helvetica", "B", 9.5)
         pdf.set_text_color(*C_PRIMARY)
-        pdf.cell(0, 7, f"    * Programación Sugerida: {turns} turnos de {hours_per_turn:.1f} horas cada uno", border="LBR", fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        if turns > 0:
+            pdf.cell(0, 7, f"    * Programación Sugerida: {turns} {'turno' if turns == 1 else 'turnos'} de {hours_per_turn_str} cada uno", border="LR", fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_font("helvetica", "B", 9)
+            pdf.cell(0, 7, f"    * Días sugeridos: {days_str} (siempre y cuando la meteorología lo permita, ya que puede cambiar)", border="LBR", fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        else:
+            pdf.cell(0, 7, f"    * Programación Sugerida: {days_str}", border="LBR", fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(3)
 
         # SECTION 2: INFORME DEL AGENTE IA XAI (ESTRATEGIA Y RECOMENDACIÓN)
@@ -1578,8 +1636,8 @@ if __name__ == "__main__":
                         help="Finca a procesar: canduela o carralancha.")
     parser.add_argument("--sector", type=int, default=3, choices=[2, 3],
                         help="Sector a procesar (solo aplicable para canduela: 2 o 3).")
-    parser.add_argument("--days", type=int, default=3, choices=[3, 5],
-                        help="Número de días para la recomendación de riego: 3 o 5.")
+    parser.add_argument("--days", type=int, default=7, choices=[3, 5, 7],
+                        help="Número de días para la recomendación de riego: 3, 5 o 7.")
     parser.add_argument("--mode", type=str, default="all", choices=["all", "preprocess", "train_dl", "train_llm", "report"],
                         help="Modo de ejecución: preprocess (preprocesar datos), train_dl (entrenar modelo Two-Tower), train_llm (fine-tuning Llama), report (generar PDF) o all (completo).")
     parser.add_argument("--date", type=str, default=None, help="Fecha para el informe PDF (YYYY-MM-DD).")
