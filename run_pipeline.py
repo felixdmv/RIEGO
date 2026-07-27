@@ -346,7 +346,10 @@ class AgroDataManager:
         df_master[etc_col] = df_master['ET0_Calculada'] * df_master['Kc_Dinamico']
 
         # 6. FloraPulse Data Ingestion (Soil moisture is kept, potentials are discarded)
-        excel_files = glob.glob(os.path.join(self.base_path, 'florapulse', "*.xlsx"))
+        excel_files = sorted(list(set(
+            glob.glob(os.path.join(self.base_path, 'florapulse', "*.xlsx")) +
+            glob.glob(os.path.join(self.base_path, "*MINI*.xlsx"))
+        )))
         dfs_fp = []
         for f in excel_files:
             try:
@@ -402,13 +405,16 @@ class AgroDataManager:
             if col_sm60: rename_dict[col_sm60] = 'FP_Humedad_60cm'
             df_fp_daily = df_fp_daily.rename(columns=rename_dict)
 
-            # Merge with master, combining columns if they already exist
-            for col in df_fp_daily.columns:
-                if col != 'Fecha':
+            # Merge with master: FloraPulse actual sensor measurements override earlier Cesens ffill values
+            df_master = pd.merge(df_master, df_fp_daily, on='Fecha', how='left', suffixes=('', '_fp'))
+            for col in ['FP_Potencial_Min', 'FP_Potencial_Base_Min', 'FP_Humedad_10cm', 'FP_Humedad_20cm', 'FP_Humedad_40cm', 'FP_Humedad_60cm']:
+                col_fp = col + '_fp'
+                if col_fp in df_master.columns:
                     if col in df_master.columns:
-                        df_master[col] = df_master[col].combine_first(df_fp_daily[col])
+                        df_master[col] = df_master[col_fp].combine_first(df_master[col])
                     else:
-                        df_master = pd.merge(df_master, df_fp_daily[['Fecha', col]], on='Fecha', how='left')
+                        df_master[col] = df_master[col_fp]
+                    df_master = df_master.drop(columns=[col_fp])
 
             # Interpolate FloraPulse columns
             fp_cols = ['FP_Potencial_Min', 'FP_Potencial_Base_Min', 'FP_Humedad_10cm', 'FP_Humedad_20cm', 'FP_Humedad_40cm', 'FP_Humedad_60cm']
