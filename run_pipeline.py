@@ -12,10 +12,21 @@ import matplotlib.pyplot as plt
 import cv2
 import rasterio
 
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
+try:
+    import torch
+    import torch.nn as nn
+    import torch.optim as optim
+    from torch.utils.data import Dataset, DataLoader
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    HAS_TORCH = True
+except ImportError:
+    torch = None
+    nn = None
+    optim = None
+    Dataset = object
+    DataLoader = None
+    device = "cpu"
+    HAS_TORCH = False
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
@@ -31,8 +42,7 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-logger.info(f"Using device: {device}")
+logger.info(f"Using device: {device} (PyTorch available: {HAS_TORCH})")
 
 # ==========================================
 # 1. DATA MANAGER (INGESTION & CLEANING)
@@ -468,7 +478,7 @@ class AgroDataManager:
 # ==========================================
 # 2. PYTORCH DEEP LEARNING (TWO-TOWER MODEL)
 # ==========================================
-class AgroTwoTower(nn.Module):
+class AgroTwoTower(nn.Module if (HAS_TORCH and nn is not None) else object):
     def __init__(self, tab_size):
         super().__init__()
         # Image (Sentinel-2 RGB 64x64) Tower
@@ -867,7 +877,7 @@ class AgroProductionReport:
         self.adapter_path = adapter_path
         
         # Load DL perception model info
-        if os.path.exists(self.model_dl_path):
+        if HAS_TORCH and os.path.exists(self.model_dl_path):
             checkpoint = torch.load(self.model_dl_path, map_location=device)
             self.cols_tab = checkpoint['cols_tab']
             self.scaler = checkpoint['scaler']
@@ -1679,8 +1689,13 @@ if __name__ == "__main__":
 
     data_manager = AgroDataManager(base_path=base_path, sector=args.sector, days=args.days)
     
-    # Run Preprocess (Required for all modes)
-    df_master = data_manager.process_all()
+    # Run Preprocess (Required for modes needing fresh processing; report mode reuses existing CSV if present)
+    final_filename = 'Dataset_Final_V4.csv' if 'carralancha' in base_path else f'Dataset_Final_S{args.sector}.csv'
+    final_path = os.path.join(base_path, final_filename)
+    if args.mode == "report" and os.path.exists(final_path):
+        df_master = pd.read_csv(final_path, parse_dates=['Fecha'])
+    else:
+        df_master = data_manager.process_all()
 
     # Column definition for the neural network
     cols_tab = [

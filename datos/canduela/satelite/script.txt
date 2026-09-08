@@ -1,0 +1,99 @@
+// =================================================================================
+// --- PASO 1: CONFIGURACIÓN DE TU NUEVA PARCELA Y FECHAS --- //
+// =================================================================================
+
+// Coordenadas exactas de tu NUEVO polígono (limpiadas y formateadas)
+var coordenadas = [
+  [-4.577624452593563, 41.814040723556154],
+  [-4.577847075941799, 41.813829819817485],
+  [-4.578032148363826, 41.813547947385764],
+  [-4.578068697003681, 41.81318036452114],
+  [-4.578187960151398, 41.81304849397068],
+  [-4.5787659761941075, 41.81318443366328],
+  [-4.5789922247252175, 41.8128168929197],
+  [-4.57900161245677, 41.812716936717905],
+  [-4.579006394036741, 41.81257571549979],
+  [-4.579008317979307, 41.81245576758731],
+  [-4.579288608821363, 41.81226179164462],
+  [-4.579359687360258, 41.81213584571337],
+  [-4.579383827241392, 41.81202789186088],
+  [-4.579473681243391, 41.811804986571325],
+  [-4.579570240767927, 41.81157808218388],
+  [-4.579650509117174, 41.81137531452619],
+  [-4.579696106670427, 41.811228375548794],
+  [-4.579764503000307, 41.810963484704025],
+  [-4.579886543510485, 41.81064661383948],
+  [-4.580094414709139, 41.81020878968733],
+  [-4.580137330053377, 41.810058849221306],
+  [-4.580166834352541, 41.80985093119436],
+  [-4.579960304258394, 41.80978995510655],
+  [-4.579854357002306, 41.80994689344449],
+  [-4.579501646516848, 41.80984693276414], // Nota: Corregido un posible error de latitud en tu lista (decía 40.8, si es 41.8 cámbialo, pero mantengo tu input)
+  [-4.57937424158864, 41.81008084051163],
+  [-4.5798677680473805, 41.81022478331631],
+  [-4.579641121385622, 41.81058863729716],
+  [-4.579350874669361, 41.811062291391984],
+  [-4.578583863489332, 41.81230090431014],
+  [-4.5780997247621436, 41.813084561839695],
+  [-4.577533597319558, 41.813997981766136],
+  [-4.577624452593563, 41.814040723556154]
+];
+
+// Creamos el objeto Geometría
+var aoi = ee.Geometry.Polygon(coordenadas);
+
+// Fechas (puedes ajustarlas)
+var FECHA_INICIO = '2023-01-01'; 
+var FECHA_FIN = '2026-02-16';
+
+// Visualización en el mapa
+Map.centerObject(aoi, 16); 
+Map.addLayer(aoi, {color: 'cyan'}, 'Nueva Parcela (AOI)');
+
+// =================================================================================
+// --- PASO 2: SELECCIÓN Y PROCESADO DE IMÁGENES SENTINEL-2 --- //
+// =================================================================================
+
+function procesarImagenS2(image) { 
+  var qa = image.select('QA60'); 
+  var cloudBitMask = 1 << 10; 
+  var cirrusBitMask = 1 << 11; 
+  var mask = qa.bitwiseAnd(cloudBitMask).eq(0).and(qa.bitwiseAnd(cirrusBitMask).eq(0));
+
+  return image.updateMask(mask).divide(10000).copyProperties(image, ['system:time_start']); 
+}
+
+var coleccion_s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED') 
+  .filterBounds(aoi)
+  .filterDate(FECHA_INICIO, FECHA_FIN)
+  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20)) 
+  .map(procesarImagenS2) 
+  .select(['B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8']);
+
+print("Imágenes encontradas en la nueva parcela:", coleccion_s2.size());
+
+// =================================================================================
+// --- PASO 3: BUCLE DE EXPORTACIÓN A GOOGLE DRIVE --- //
+// =================================================================================
+
+var listaImagenes = coleccion_s2.toList(coleccion_s2.size()); 
+var numeroDeImagenes = listaImagenes.length().getInfo();
+
+print('Preparando', numeroDeImagenes, 'tareas de exportación...');
+
+for (var i = 0; i < numeroDeImagenes; i++) { 
+  var image = ee.Image(listaImagenes.get(i));
+  var fecha = image.date().format('YYYY-MM-DD').getInfo(); 
+  var nombreArchivo = 'S2_Chip_NuevaParcela_' + fecha;
+
+  Export.image.toDrive({ 
+    image: image,
+    description: 'Export_' + nombreArchivo, 
+    folder: 'GEE_Tesis_NuevaParcela', // Se guardará en esta nueva carpeta en tu Drive
+    fileNamePrefix: nombreArchivo, 
+    region: aoi, 
+    scale: 10, 
+    fileFormat: 'GeoTIFF', 
+    formatOptions: { cloudOptimized: true } 
+  }); 
+}
